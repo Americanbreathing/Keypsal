@@ -458,159 +458,175 @@ class PanelView(discord.ui.View):
     
     @discord.ui.button(label="Login", emoji="🔑", style=discord.ButtonStyle.primary, custom_id="panel_login")
     async def login_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user_id = str(interaction.user.id)
-        current_time = int(time.time())
-        
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''SELECT key, status, expires_at, hwid, created_at 
-                            FROM licenses WHERE discord_id = ? ORDER BY created_at DESC''', (user_id,))
-            licenses = cursor.fetchall()
-        
-        if not licenses:
-            embed = discord.Embed(
-                title="❌ No License Found",
-                description="You don't have any licenses.\nContact an admin to get one!",
-                color=0xFF5555
-            )
-        else:
-            embed = discord.Embed(title="🔑 Your Licenses", color=0x5814783)
-            for lic in licenses:
-                key, status, expires_at, hwid, created_at = lic
-                expires_str = datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d') if expires_at else "N/A"
-                is_expired = expires_at < current_time
-                status_display = "⏰ EXPIRED" if is_expired else f"✅ {status.upper()}"
-                hwid_display = hwid if hwid != "UNBOUND" else "Not activated"
-                
-                embed.add_field(
-                    name=f"{status_display}",
-                    value=f"**Expires:** {expires_str}\n**HWID:** `{hwid_display[:20]}...`" if len(str(hwid)) > 20 else f"**Expires:** {expires_str}\n**HWID:** `{hwid_display}`",
-                    inline=False
+        await interaction.response.defer(ephemeral=True)
+        try:
+            user_id = str(interaction.user.id)
+            current_time = int(time.time())
+            
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''SELECT key, status, expires_at, hwid, created_at 
+                                FROM licenses WHERE discord_id = ? ORDER BY created_at DESC''', (user_id,))
+                licenses = cursor.fetchall()
+            
+            if not licenses:
+                embed = discord.Embed(
+                    title="❌ No License Found",
+                    description="You don't have any licenses.\nContact an admin to get one!",
+                    color=0xFF5555
                 )
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            else:
+                embed = discord.Embed(title="🔑 Your Licenses", color=0x5814783)
+                for lic in licenses:
+                    key, status, expires_at, hwid, created_at = lic
+                    expires_str = datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d') if expires_at else "N/A"
+                    is_expired = expires_at < current_time
+                    status_display = "⏰ EXPIRED" if is_expired else f"✅ {status.upper()}"
+                    hwid_display = hwid if hwid != "UNBOUND" else "Not activated"
+                    
+                    embed.add_field(
+                        name=f"{status_display}",
+                        value=f"**Expires:** {expires_str}\n**HWID:** `{hwid_display[:20]}...`" if len(str(hwid)) > 20 else f"**Expires:** {expires_str}\n**HWID:** `{hwid_display}`",
+                        inline=False
+                    )
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
     
     @discord.ui.button(label="Get Script", emoji="📜", style=discord.ButtonStyle.primary, custom_id="panel_getscript")
     async def getscript_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user_id = str(interaction.user.id)
-        current_time = int(time.time())
-        
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''SELECT key FROM licenses 
-                            WHERE discord_id = ? AND status != 'revoked' AND expires_at > ?
-                            ORDER BY created_at DESC LIMIT 1''', (user_id, current_time))
-            result = cursor.fetchone()
-        
-        if not result:
-            embed = discord.Embed(
-                title="❌ No Active License",
-                description="You need an active license to get the script.\nContact an admin to purchase one!",
-                color=0xFF5555
-            )
-        else:
-            key = result[0]
-            # TODO: UPDATE THIS URL TO YOUR RAW LUA SCRIPT URL
-            script_url = "https://raw.githubusercontent.com/Americanbreathing/Keypsal/main/PXHV_Scripts/PXHB%20FF2.lua"
+        await interaction.response.defer(ephemeral=True)
+        try:
+            user_id = str(interaction.user.id)
+            current_time = int(time.time())
             
-            script_loader = f'_G.LicenseKey = "{key}"\nloadstring(game:HttpGet("{script_url}"))()'
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''SELECT key FROM licenses 
+                                WHERE discord_id = ? AND status != 'revoked' AND expires_at > ?
+                                ORDER BY created_at DESC LIMIT 1''', (user_id, current_time))
+                result = cursor.fetchone()
             
-            embed = discord.Embed(
-                title="📜 Your PXHB Script",
-                description="Copy the code below and paste it into your executor.",
-                color=0x55FF55
-            )
-            embed.add_field(name="Script Loader", value=f"```lua\n{script_loader}\n```", inline=False)
-            embed.add_field(name="⚠️ Warning", value="Do NOT share this! The key is linked to your hardware.", inline=False)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            if not result:
+                embed = discord.Embed(
+                    title="❌ Access Denied",
+                    description="You must have an **Active License** to get the script.\n\n1. Purchase a key\n2. Use `/genkey` (Admin)\n3. Click 'Login' to check status",
+                    color=0xFF5555
+                )
+            else:
+                key = result[0]
+                # TODO: UPDATE THIS URL TO YOUR RAW LUA SCRIPT URL
+                script_url = "https://raw.githubusercontent.com/Americanbreathing/Keypsal/main/PXHV_Scripts/PXHB%20FF2.lua"
+                
+                script_loader = f'_G.LicenseKey = "{key}"\nloadstring(game:HttpGet("{script_url}"))()'
+                
+                embed = discord.Embed(
+                    title="📜 Your PXHB Script",
+                    description="Copy the code below and paste it into your executor.",
+                    color=0x55FF55
+                )
+                embed.add_field(name="Script Loader", value=f"```lua\n{script_loader}\n```", inline=False)
+                embed.add_field(name="⚠️ Warning", value="Do NOT share this! The key is linked to your hardware.", inline=False)
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
     
     @discord.ui.button(label="Stats", emoji="📊", style=discord.ButtonStyle.primary, custom_id="panel_stats")
     async def stats_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user_id = str(interaction.user.id)
-        current_time = int(time.time())
-        
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            # Get user's license stats
-            cursor.execute('SELECT COUNT(*) FROM licenses WHERE discord_id = ?', (user_id,))
-            total = cursor.fetchone()[0]
+        await interaction.response.defer(ephemeral=True)
+        try:
+            user_id = str(interaction.user.id)
+            current_time = int(time.time())
             
-            cursor.execute('SELECT COUNT(*) FROM licenses WHERE discord_id = ? AND status = "active" AND expires_at > ?', 
-                          (user_id, current_time))
-            active = cursor.fetchone()[0]
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                # Get user's license stats
+                cursor.execute('SELECT COUNT(*) FROM licenses WHERE discord_id = ?', (user_id,))
+                total = cursor.fetchone()[0]
+                
+                cursor.execute('SELECT COUNT(*) FROM licenses WHERE discord_id = ? AND status = "active" AND expires_at > ?', 
+                              (user_id, current_time))
+                active = cursor.fetchone()[0]
+                
+                cursor.execute('SELECT expires_at FROM licenses WHERE discord_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1', 
+                              (user_id, current_time))
+                latest_expiry = cursor.fetchone()
             
-            cursor.execute('SELECT expires_at FROM licenses WHERE discord_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1', 
-                          (user_id, current_time))
-            latest_expiry = cursor.fetchone()
-        
-        if total == 0:
-            embed = discord.Embed(
-                title="📊 Your Stats",
-                description="You have no licenses yet!",
-                color=0x5814783
-            )
-        else:
-            embed = discord.Embed(title="📊 Your License Stats", color=0x5814783)
-            embed.add_field(name="Total Licenses", value=str(total), inline=True)
-            embed.add_field(name="Active", value=str(active), inline=True)
+            if total == 0:
+                embed = discord.Embed(
+                    title="📊 Your Stats",
+                    description="You have no licenses yet!",
+                    color=0x5814783
+                )
+            else:
+                embed = discord.Embed(title="📊 Your License Stats", color=0x5814783)
+                embed.add_field(name="Total Licenses", value=str(total), inline=True)
+                embed.add_field(name="Active", value=str(active), inline=True)
+                
+                if latest_expiry:
+                    days_left = (latest_expiry[0] - current_time) // 86400
+                    embed.add_field(name="Days Remaining", value=str(max(0, days_left)), inline=True)
             
-            if latest_expiry:
-                days_left = (latest_expiry[0] - current_time) // 86400
-                embed.add_field(name="Days Remaining", value=str(max(0, days_left)), inline=True)
-        
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
     
     @discord.ui.button(label="HWID Reset", emoji="🖥️", style=discord.ButtonStyle.primary, custom_id="panel_hwidreset")
     async def hwidreset_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        user_id = str(interaction.user.id)
-        current_time = int(time.time())
-        cooldown_days = 7
-        cooldown_seconds = cooldown_days * 24 * 60 * 60
-        
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''SELECT id, key, hwid, last_hwid_reset, expires_at 
-                            FROM licenses WHERE discord_id = ? AND status != 'revoked' AND expires_at > ?
-                            ORDER BY created_at DESC LIMIT 1''', (user_id, current_time))
-            result = cursor.fetchone()
-        
-        if not result:
+        await interaction.response.defer(ephemeral=True)
+        try:
+            user_id = str(interaction.user.id)
+            current_time = int(time.time())
+            cooldown_days = 7
+            cooldown_seconds = cooldown_days * 24 * 60 * 60
+            
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''SELECT id, key, hwid, last_hwid_reset, expires_at 
+                                FROM licenses WHERE discord_id = ? AND status != 'revoked' AND expires_at > ?
+                                ORDER BY created_at DESC LIMIT 1''', (user_id, current_time))
+                result = cursor.fetchone()
+            
+            if not result:
+                embed = discord.Embed(
+                    title="❌ No Active License",
+                    description="You need an active license to reset HWID.",
+                    color=0xFF5555
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+            
+            license_id, key, hwid, last_reset, expires_at = result
+            
+            # Check cooldown
+            if last_reset and (current_time - last_reset) < cooldown_seconds:
+                remaining = cooldown_seconds - (current_time - last_reset)
+                days = remaining // 86400
+                hours = (remaining % 86400) // 3600
+                embed = discord.Embed(
+                    title="⏰ HWID Reset Cooldown",
+                    description=f"You can reset your HWID in **{days}d {hours}h**.\n\nCooldown: {cooldown_days} days between resets.",
+                    color=0xFFAA00
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+            
+            # Perform reset
+            with get_db_connection() as conn:
+                conn.execute('''UPDATE licenses SET hwid = 'UNBOUND', last_hwid_reset = ? WHERE id = ?''', 
+                            (current_time, license_id))
+            
             embed = discord.Embed(
-                title="❌ No Active License",
-                description="You need an active license to reset HWID.",
-                color=0xFF5555
+                title="✅ HWID Reset Successful",
+                description="Your HWID has been reset!\nLaunch the script on your new PC to bind it.",
+                color=0x55FF55
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        license_id, key, hwid, last_reset, expires_at = result
-        
-        # Check cooldown
-        if last_reset and (current_time - last_reset) < cooldown_seconds:
-            remaining = cooldown_seconds - (current_time - last_reset)
-            days = remaining // 86400
-            hours = (remaining % 86400) // 3600
-            embed = discord.Embed(
-                title="⏰ HWID Reset Cooldown",
-                description=f"You can reset your HWID in **{days}d {hours}h**.\n\nCooldown: {cooldown_days} days between resets.",
-                color=0xFFAA00
-            )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-            return
-        
-        # Perform reset
-        with get_db_connection() as conn:
-            conn.execute('''UPDATE licenses SET hwid = 'UNBOUND', last_hwid_reset = ? WHERE id = ?''', 
-                        (current_time, license_id))
-        
-        embed = discord.Embed(
-            title="✅ HWID Reset Successful",
-            description="Your HWID has been reset!\nLaunch the script on your new PC to bind it.",
-            color=0x55FF55
-        )
-        embed.add_field(name="Next Reset Available", value=f"In {cooldown_days} days", inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            embed.add_field(name="Next Reset Available", value=f"In {cooldown_days} days", inline=False)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="panel", description="Send the PXHB control panel embed (Owner Only)")
 async def panel(interaction: discord.Interaction):
