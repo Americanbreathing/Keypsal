@@ -510,13 +510,18 @@ class PanelView(discord.ui.View):
             )
         else:
             key = result[0]
+            # TODO: UPDATE THIS URL TO YOUR RAW LUA SCRIPT URL
+            script_url = "https://raw.githubusercontent.com/Americanbreathing/Keypsal/main/PXHV_Scripts/PXHB%20FF2.lua"
+            
+            script_loader = f'_G.LicenseKey = "{key}"\nloadstring(game:HttpGet("{script_url}"))()'
+            
             embed = discord.Embed(
-                title="📜 Your PXHB Script Key",
-                description="Copy this key and paste it into the script loader.",
+                title="📜 Your PXHB Script",
+                description="Copy the code below and paste it into your executor.",
                 color=0x55FF55
             )
-            embed.add_field(name="License Key", value=f"```{key}```", inline=False)
-            embed.add_field(name="⚠️ Warning", value="Do NOT share this key! It's HWID-locked to your PC.", inline=False)
+            embed.add_field(name="Script Loader", value=f"```lua\n{script_loader}\n```", inline=False)
+            embed.add_field(name="⚠️ Warning", value="Do NOT share this! The key is linked to your hardware.", inline=False)
         
         await interaction.response.send_message(embed=embed, ephemeral=True)
     
