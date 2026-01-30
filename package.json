@@ -3,7 +3,6 @@
     "private": true,
     "scripts": {
         "build": "cd web && npm install && npm run build",
-        "start:web": "cd web && npm run start",
-        "start:bot": "python bot/bot.py"
+        "start": "cd web && npm run start"
     }
 }
