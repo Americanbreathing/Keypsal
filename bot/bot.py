@@ -637,7 +637,7 @@ async def panel(interaction: discord.Interaction):
     embed = discord.Embed(
         title="PX HB",
         description="\nAll licenses are HWID-bound, so don't try to share your script or YOU WILL BE BLACKLISTED.",
-        color=0x5814783
+        color=5814783
     )
     
     view = PanelView()
