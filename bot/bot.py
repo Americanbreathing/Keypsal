@@ -61,6 +61,17 @@ def init_db():
             discord_name TEXT NOT NULL,
             added_at INTEGER NOT NULL
         )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            user_name TEXT NOT NULL,
+            script_name TEXT NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            data TEXT NOT NULL,
+            upvotes INTEGER DEFAULT 0,
+            created_at INTEGER NOT NULL
+        )''')
 
 init_db()
 
