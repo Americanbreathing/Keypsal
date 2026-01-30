@@ -20,6 +20,7 @@ SECRET_KEY = "PXHB_SECRET_KEY_8829" # MUST MATCH LUA SCRIPT
 WEBHOOK_PORT = int(os.getenv('PORT', 8080))  # Dynamic port for Railway/Cloud
 DB_NAME = 'licenses.db'
 CUSTOMER_ROLE_ID = 1456538123629494335 # Customer Role ID
+OWNER_ROLE_ID = 1456538170869944414 # Owner Role ID
 
 # ==============================================================================
 # DATABASE HELPERS
@@ -43,6 +44,11 @@ def init_db():
             created_at INTEGER NOT NULL,
             activated_at INTEGER,
             expires_at INTEGER NOT NULL
+        )''')
+        conn.execute('''CREATE TABLE IF NOT EXISTS sellers (
+            discord_id TEXT PRIMARY KEY,
+            discord_name TEXT NOT NULL,
+            added_at INTEGER NOT NULL
         )''')
 
 init_db()
@@ -194,13 +200,72 @@ async def check_expirations():
         print(f"[Task Error] Error in check_expirations: {e}")
 
 # ==============================================================================
+# PERMISSION CHECKS
+# ==============================================================================
+def is_owner(interaction: discord.Interaction):
+    """Checks if the user has the Owner role."""
+    role = interaction.guild.get_role(OWNER_ROLE_ID)
+    return (role in interaction.user.roles if role else False) or interaction.user.guild_permissions.administrator
+
+async def is_seller(interaction: discord.Interaction):
+    """Checks if the user is a registered seller or an admin/owner."""
+    if is_owner(interaction):
+        return True
+        
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM sellers WHERE discord_id = ?", (str(interaction.user.id),))
+        return cursor.fetchone() is not None
+
+# ==============================================================================
+# SELLERS MANAGEMENT (OWNER ONLY)
+# ==============================================================================
+
+@bot.tree.command(name="addseller", description="Add a new authorized seller (Owner Only)")
+@app_commands.describe(user="The Discord user to authorize as a seller")
+async def addseller(interaction: discord.Interaction, user: discord.Member):
+    if not is_owner(interaction):
+        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
+        return
+        
+    try:
+        with get_db_connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO sellers (discord_id, discord_name, added_at) VALUES (?, ?, ?)",
+                      (str(user.id), str(user), int(time.time())))
+        await interaction.response.send_message(f"✅ {user.mention} is now an authorized **Seller**.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+
+@bot.tree.command(name="removeseller", description="Remove an authorized seller (Owner Only)")
+@app_commands.describe(user="The Discord user to remove from sellers")
+async def removeseller(interaction: discord.Interaction, user: discord.User):
+    if not is_owner(interaction):
+        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
+        return
+        
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM sellers WHERE discord_id = ?", (str(user.id),))
+            count = cursor.rowcount
+            
+        if count > 0:
+            await interaction.response.send_message(f"✅ Removed {user.mention} from authorized sellers.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"❌ {user.mention} was not a registered seller.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"Error: {e}", ephemeral=True)
+
+# ==============================================================================
 # SLASH COMMANDS
 # ==============================================================================
 
 @bot.tree.command(name="genkey", description="Generate a license key for a user")
 @app_commands.describe(user="The Discord user to generate a key for", days="Duration in days (999 for lifetime)")
-@app_commands.checks.has_permissions(administrator=True)
 async def genkey(interaction: discord.Interaction, user: discord.User, days: int = 30):
+    if not await is_seller(interaction):
+        await interaction.response.send_message("❌ Access Denied: You are not an authorized **Seller**.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=True)
     
     try:
@@ -246,8 +311,10 @@ async def genkey(interaction: discord.Interaction, user: discord.User, days: int
 
 @bot.tree.command(name="userinfo", description="View a user's license information")
 @app_commands.describe(user="The Discord user to check")
-@app_commands.checks.has_permissions(administrator=True)
 async def userinfo(interaction: discord.Interaction, user: discord.User):
+    if not await is_seller(interaction):
+        await interaction.response.send_message("❌ Access Denied.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=True)
     
     try:
@@ -280,8 +347,10 @@ async def userinfo(interaction: discord.Interaction, user: discord.User):
 
 @bot.tree.command(name="revoke", description="Revoke a user's license")
 @app_commands.describe(user="The Discord user whose license to revoke")
-@app_commands.checks.has_permissions(administrator=True)
 async def revoke(interaction: discord.Interaction, user: discord.User):
+    if not await is_seller(interaction):
+        await interaction.response.send_message("❌ Access Denied.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=True)
     
     try:
@@ -302,8 +371,10 @@ async def revoke(interaction: discord.Interaction, user: discord.User):
         await interaction.followup.send(f"Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="stats", description="View license statistics")
-@app_commands.checks.has_permissions(administrator=True)
 async def stats(interaction: discord.Interaction):
+    if not await is_seller(interaction):
+        await interaction.response.send_message("❌ Access Denied.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=True)
     
     try:
@@ -336,10 +407,16 @@ async def stats(interaction: discord.Interaction):
 @bot.tree.command(name="help", description="Show bot commands")
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="PXHB Bot Commands", color=0x5865F2)
-    embed.add_field(name="/genkey @user <days>", value="Generate a license (Auto-assigns Customer role)", inline=False)
+    embed.add_field(name="/genkey @user <days>", value="Generate a license (Sellers Only)", inline=False)
     embed.add_field(name="/userinfo @user", value="View user's licenses", inline=False)
-    embed.add_field(name="/revoke @user", value="Revoke licenses (Auto-takes Customer role)", inline=False)
+    embed.add_field(name="/revoke @user", value="Revoke licenses", inline=False)
     embed.add_field(name="/stats", value="View license statistics", inline=False)
+    
+    if is_owner(interaction):
+        embed.add_field(name="--- OWNER ONLY ---", value="\u200b", inline=False)
+        embed.add_field(name="/addseller @user", value="Authorize a user to sell keys", inline=False)
+        embed.add_field(name="/removeseller @user", value="Revoke seller permissions", inline=False)
+        
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 # Run Bot
