@@ -517,7 +517,7 @@ class PanelView(discord.ui.View):
             else:
                 key = result[0]
                 # TODO: UPDATE THIS URL TO YOUR RAW LUA SCRIPT URL
-                script_url = "https://raw.githubusercontent.com/Americanbreathing/Keypsal/main/PXHV_Scripts/PXHB%20FF2.lua"
+                script_url = "https://raw.githubusercontent.com/Americanbreathing/Keypsal/main/PXHV_Scripts/PXHB_FF2_Obfuscated.lua"
                 
                 script_loader = f'_G.LicenseKey = "{key}"\nloadstring(game:HttpGet("{script_url}"))()'
                 
