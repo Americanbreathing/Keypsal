@@ -1,7 +1,7 @@
 import NextAuth from "next-auth"
 import DiscordProvider from "next-auth/providers/discord"
 
-const handler = NextAuth({
+export const authOptions = {
     providers: [
         DiscordProvider({
             clientId: process.env.DISCORD_CLIENT_ID || "",
@@ -10,9 +10,9 @@ const handler = NextAuth({
         }),
     ],
     callbacks: {
-        async session({ session, token }) {
+        async session({ session, token }: any) {
             if (session.user) {
-                (session.user as any).id = token.sub;
+                session.user.id = token.sub;
             }
             return session;
         },
@@ -20,6 +20,8 @@ const handler = NextAuth({
     pages: {
         signIn: '/',
     },
-})
+};
 
-export { handler as GET, handler as POST }
+const handler = NextAuth(authOptions);
+
+export { handler as GET, handler as POST };
