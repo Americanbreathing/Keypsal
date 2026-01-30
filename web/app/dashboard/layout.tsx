@@ -25,9 +25,6 @@ import {
     LogOut,
     Menu,
 } from 'lucide-react';
-import { Logo } from '@/components/logo';
-import { PlaceHolderImages } from '@/lib/placeholder-images';
-import { cn } from '@/lib/utils';
 import React from 'react';
 
 const navItems = [
@@ -52,7 +49,7 @@ export default function DashboardLayout({
             <Sidebar>
                 <SidebarHeader>
                     <div className="flex items-center justify-center py-4">
-                        <Logo />
+                        <span className="text-xl font-bold text-primary">PXHB</span>
                     </div>
                 </SidebarHeader>
                 <SidebarContent>
