@@ -1,4 +1,6 @@
-import Link from 'next/link';
+'use client';
+
+import { signIn } from 'next-auth/react';
 import { Button } from '@/components/ui/button';
 import { DiscordIcon } from '@/components/icons/discord-icon';
 import { Logo } from '@/components/logo';
@@ -16,11 +18,13 @@ export default function LoginPage() {
             Access your scripts, configurations, and manage your account.
           </p>
         </div>
-        <Button asChild className="w-full max-w-xs group bg-primary hover:bg-primary/90 text-primary-foreground" size="lg">
-          <Link href="/dashboard">
-            <DiscordIcon className="h-6 w-6 mr-2 transition-transform group-hover:scale-110" />
-            Login with Discord
-          </Link>
+        <Button
+          onClick={() => signIn('discord', { callbackUrl: '/dashboard' })}
+          className="w-full max-w-xs group bg-primary hover:bg-primary/90 text-primary-foreground"
+          size="lg"
+        >
+          <DiscordIcon className="h-6 w-6 mr-2 transition-transform group-hover:scale-110" />
+          Login with Discord
         </Button>
       </div>
     </main>
