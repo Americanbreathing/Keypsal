@@ -47,11 +47,6 @@ export default function DashboardLayout({
     return (
         <SidebarProvider>
             <Sidebar>
-                <SidebarHeader>
-                    <div className="flex items-center justify-center py-4">
-                        <span className="text-xl font-bold text-primary">PXHB</span>
-                    </div>
-                </SidebarHeader>
                 <SidebarContent>
                     <SidebarMenu>
                         {navItems.map((item) => (
@@ -108,7 +103,6 @@ export default function DashboardLayout({
                             <span className="sr-only">Toggle Menu</span>
                         </Button>
                     </SidebarTrigger>
-                    <span className="text-xl font-bold text-primary">PXHB</span>
                 </header>
                 <main className="p-4 sm:p-6 lg:p-8 w-full max-w-7xl mx-auto">{children}</main>
             </SidebarInset>

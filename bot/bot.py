@@ -441,6 +441,27 @@ async def help_command(interaction: discord.Interaction):
         
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
+@bot.tree.command(name="backup", description="Download a backup of the license database (Owner Only)")
+async def backup(interaction: discord.Interaction):
+    if not is_owner(interaction):
+        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
+        return
+    
+    try:
+        await interaction.response.defer(ephemeral=True)
+        
+        # Check if database file exists
+        if not os.path.exists(DB_NAME):
+            await interaction.followup.send("❌ Database file not found!", ephemeral=True)
+            return
+        
+        # Send the database file as an attachment
+        file = discord.File(DB_NAME, filename=f"licenses_backup_{int(time.time())}.db")
+        await interaction.followup.send("✅ **Database Backup**\nHere's your backup file:", file=file, ephemeral=True)
+        
+    except Exception as e:
+        await interaction.followup.send(f"❌ Backup failed: {str(e)}", ephemeral=True)
+
 # Run Bot
 if __name__ == "__main__":
     if TOKEN:
