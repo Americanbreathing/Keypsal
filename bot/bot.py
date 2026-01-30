@@ -476,7 +476,7 @@ class PanelView(discord.ui.View):
                     color=0xFF5555
                 )
             else:
-                embed = discord.Embed(title="🔑 Your Licenses", color=0x5814783)
+                embed = discord.Embed(title="🔑 Your Licenses", color=5814783)
                 for lic in licenses:
                     key, status, expires_at, hwid, created_at = lic
                     expires_str = datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d') if expires_at else "N/A"
@@ -558,10 +558,10 @@ class PanelView(discord.ui.View):
                 embed = discord.Embed(
                     title="📊 Your Stats",
                     description="You have no licenses yet!",
-                    color=0x5814783
+                    color=5814783
                 )
             else:
-                embed = discord.Embed(title="📊 Your License Stats", color=0x5814783)
+                embed = discord.Embed(title="📊 Your License Stats", color=5814783)
                 embed.add_field(name="Total Licenses", value=str(total), inline=True)
                 embed.add_field(name="Active", value=str(active), inline=True)
                 
