@@ -53,7 +53,8 @@ def init_db():
             status TEXT DEFAULT 'pending',
             created_at INTEGER NOT NULL,
             activated_at INTEGER,
-            expires_at INTEGER NOT NULL
+            expires_at INTEGER NOT NULL,
+            last_hwid_reset INTEGER DEFAULT 0
         )''')
         conn.execute('''CREATE TABLE IF NOT EXISTS sellers (
             discord_id TEXT PRIMARY KEY,
