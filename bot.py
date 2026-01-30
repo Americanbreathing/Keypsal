@@ -18,7 +18,17 @@ TOKEN = os.getenv('DISCORD_TOKEN')
 # CONFIGURATION
 SECRET_KEY = "PXHB_SECRET_KEY_8829" # MUST MATCH LUA SCRIPT
 WEBHOOK_PORT = int(os.getenv('PORT', 8080))  # Dynamic port for Railway/Cloud
-DB_NAME = 'licenses.db'
+
+# Persistence Logic: Check for Railway Volume mount path
+# Default to current directory if not found
+DATA_DIR = os.getenv('DATA_DIR', '/app/data' if os.path.exists('/app/data') else '.')
+DB_NAME = os.path.join(DATA_DIR, 'licenses.db')
+
+# Ensure directory exists
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+print(f"[System] Database path: {DB_NAME}")
 CUSTOMER_ROLE_ID = 1456538123629494335 # Customer Role ID
 OWNER_ROLE_ID = 1456538170869944414 # Owner Role ID
 
