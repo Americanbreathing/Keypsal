@@ -32,6 +32,16 @@ print(f"[System] Database path: {DB_NAME}")
 CUSTOMER_ROLE_ID = 1456538123629494335 # Customer Role ID
 OWNER_ROLE_ID = 1456538170869944414 # Owner Role ID
 
+# VERSION INFO (Update these when pushing new script)
+SCRIPT_VERSION = "2.1.0"
+LAST_UPDATE = "January 30, 2026 10:30 PM EST"
+CHANGELOG = [
+    "Fixed AC Bypasser timing (3s init delay)",
+    "Removed legacy KeyAuth.win code",
+    "Removed QB Aimbot (detection risk)",
+    "Console cleaner active"
+]
+
 # ==============================================================================
 # DATABASE HELPERS
 # ==============================================================================
@@ -624,6 +634,23 @@ class PanelView(discord.ui.View):
                 color=0x55FF55
             )
             embed.add_field(name="Next Reset Available", value=f"In {cooldown_days} days", inline=False)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+    
+    @discord.ui.button(label="Version", emoji="ℹ️", style=discord.ButtonStyle.secondary, custom_id="panel_version")
+    async def version_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            embed = discord.Embed(
+                title="ℹ️ PXHB Script Version",
+                color=0x5865F2
+            )
+            embed.add_field(name="Current Version", value=f"**v{SCRIPT_VERSION}**", inline=True)
+            embed.add_field(name="Last Updated", value=LAST_UPDATE, inline=True)
+            embed.add_field(name="Changelog", value="\n".join([f"• {item}" for item in CHANGELOG]), inline=False)
+            embed.set_footer(text="If your script is outdated, click 'Get Script' again.")
+            
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
