@@ -34,14 +34,14 @@ CUSTOMER_ROLE_ID = 1456538123629494335 # Customer Role ID
 OWNER_ROLE_ID = 1456538170869944414 # Owner Role ID
 
 # VERSION INFO (Update these when pushing new script)
-SCRIPT_VERSION = "2.3.1"
-LAST_UPDATE = "February 2, 2026 2:10 AM EST"
+SCRIPT_VERSION = "2.3.2"
+LAST_UPDATE = "February 2, 2026 2:15 AM EST"
 CHANGELOG = [
+    "🛠️ Fixed: 'Readonly table' error",
     "↩️ Reverted to Stable Zen AC Bypasser",
     "🔒 NEW: Strict HWID + Roblox ID verification",
     "🔒 NEW: Anti key-sharing detection",
-    "🔒 NEW: Admin security alerts",
-    "Console cleaner active"
+    "Console cleaner disabled"
 ]
 
 # ==============================================================================
