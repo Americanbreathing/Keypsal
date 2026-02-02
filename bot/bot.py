@@ -34,12 +34,13 @@ CUSTOMER_ROLE_ID = 1456538123629494335 # Customer Role ID
 OWNER_ROLE_ID = 1456538170869944414 # Owner Role ID
 
 # VERSION INFO (Update these when pushing new script)
-SCRIPT_VERSION = "2.1.0"
-LAST_UPDATE = "January 30, 2026 10:30 PM EST"
+SCRIPT_VERSION = "2.2.0"
+LAST_UPDATE = "February 2, 2026 1:30 AM EST"
 CHANGELOG = [
+    "🔒 NEW: Strict HWID + Roblox ID verification",
+    "🔒 NEW: Anti key-sharing detection",
+    "🔒 NEW: Admin security alerts",
     "Fixed AC Bypasser timing (3s init delay)",
-    "Removed legacy KeyAuth.win code",
-    "Removed QB Aimbot (detection risk)",
     "Console cleaner active"
 ]
 
