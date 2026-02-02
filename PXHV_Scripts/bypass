@@ -1,0 +1,447 @@
+local PULSE_DEV_OUTPUT = true
+
+local function initPulse()
+    if game.PlaceId == 8206123094 then 
+        return false
+    end
+
+    print("[Pulse] Initializing...")
+
+    if not LPH_OBFUSCATED then
+        getfenv().LPH_NO_VIRTUALIZE = function(f) return f end
+    end
+
+    local Players = game:GetService("Players")
+    local LocalPlayer = Players.LocalPlayer
+
+    local function pulseKick(reason)
+        warn("[Pulse] " .. reason)
+        LocalPlayer:Kick("[Pulse] " .. reason)
+    end
+
+    local ReplicatedStorage = game:GetService("ReplicatedStorage")
+    local RunService = game:GetService("RunService")
+
+    local RemotesFolder = ReplicatedStorage:FindFirstChild("Remotes")
+    if not RemotesFolder then
+        RemotesFolder = ReplicatedStorage:WaitForChild("Remotes", 5)
+    end
+    
+    if not RemotesFolder then
+        warn("[Pulse] Remotes folder not found - likely practice mode")
+        return false
+    end
+
+    local TargetRemote = RemotesFolder:FindFirstChild("CharacterSoundEvent")
+    if not TargetRemote then
+        TargetRemote = RemotesFolder:WaitForChild("CharacterSoundEvent", 5)
+    end
+    
+    if not TargetRemote then
+        warn("[Pulse] CharacterSoundEvent not found - likely practice mode")
+        return false
+    end
+    print("[Pulse] Found target remote")
+
+    local handshake_func = nil
+    local update_func = nil
+    local primary_shuffle = nil
+    local secondary_shuffle = nil
+    local stack = nil
+
+    setreadonly(table, false)
+    table.compare = function(x, y)
+        if type(y) ~= "table" then return false end
+        for idx, val in pairs(x) do
+            if rawget(y, idx) ~= val then return false end
+        end
+        return rawequal(rawlen(x), rawlen(y))
+    end
+    setreadonly(table, true)
+
+    pcall(function()
+        xpcall(function()
+            game:_()
+        end, function()
+            stack = debug.getinfo(2, "f") or debug.info(2, "f")
+        end)
+    end)
+
+    if stack then
+        print("[Pulse] Stack captured")
+    else
+        warn("[Pulse] Failed to capture stack - continuing anyway")
+    end
+
+    local ok, err = pcall(function()
+        local real_delay
+        real_delay = hookfunction(delay, LPH_NO_VIRTUALIZE(function(time, callback, ...)
+            if callback then
+                local ok2, ups = pcall(getupvalues, callback)
+                if ok2 and ups then
+                    for i, v in pairs(ups) do
+                        if type(v) == "number" and v > 1000 then
+                            pcall(setupvalue, callback, i, 1)
+                        end
+                    end
+                end
+            end
+            return real_delay(time, callback, ...)
+        end))
+    end)
+    if not ok then
+        warn("[Pulse] Failed to hook delay: " .. tostring(err))
+    else
+        print("[Pulse] Hooked delay")
+    end
+
+    local ok, err = pcall(function()
+        local real_task_delay
+        real_task_delay = hookfunction(task.delay, LPH_NO_VIRTUALIZE(function(time, callback, ...)
+            if callback then
+                local ok2, ups = pcall(getupvalues, callback)
+                if ok2 and ups then
+                    for i, v in pairs(ups) do
+                        if type(v) == "number" and v > 1000 then
+                            pcall(setupvalue, callback, i, 1)
+                        end
+                    end
+                end
+            end
+            return real_task_delay(time, callback, ...)
+        end))
+    end)
+    if not ok then
+        warn("[Pulse] Failed to hook task.delay: " .. tostring(err))
+    else
+        print("[Pulse] Hooked task.delay")
+    end
+
+    local string_sub
+    local ok, err = pcall(function()
+        string_sub = hookfunction(string.sub, LPH_NO_VIRTUALIZE(function(...)
+            local args = {...}
+            if not checkcaller() then
+                if args[2] == -2 and args[3] == -2 then 
+                    return "n" 
+                end
+                if args[2] == -1 then 
+                    return " " 
+                end
+            end
+            return string_sub(...)
+        end))
+    end)
+    if not ok then
+        warn("[Pulse] Failed to hook string.sub: " .. tostring(err))
+    else
+        print("[Pulse] Hooked string.sub")
+    end
+
+    local pcall_hook
+    local ok, err = pcall(function()
+        pcall_hook = hookfunction(pcall, LPH_NO_VIRTUALIZE(function(func, ...)
+            if func == stack and not checkcaller() then
+                return false, "missing argument #1 (Instance expected)"
+            end
+            return pcall_hook(func, ...)
+        end))
+    end)
+    if not ok then
+        warn("[Pulse] Failed to hook pcall: " .. tostring(err))
+    else
+        print("[Pulse] Hooked pcall")
+    end
+
+    local info_hook
+    local ok, err = pcall(function()
+        info_hook = hookfunction(debug.info, LPH_NO_VIRTUALIZE(function(level, what, ...)
+            if level == 2 and what == "f" and not checkcaller() then
+                return stack
+            end
+            return info_hook(level, what, ...)
+        end))
+    end)
+    if not ok then
+        warn("[Pulse] Failed to hook debug.info: " .. tostring(err))
+    else
+        print("[Pulse] Hooked debug.info")
+    end
+
+    LPH_NO_VIRTUALIZE(function()
+        for _, conn in next, getconnections(TargetRemote.OnClientEvent) do
+            if conn.Function then
+                local ok2, info = pcall(debug.getinfo, conn.Function)
+                if ok2 and info and info.source and info.source:find("PlayerModule") then
+                    local ok3, consts = pcall(getconstants, conn.Function)
+                    if ok3 and consts then
+                        if table.find(consts, "game") and table.find(consts, "\0") and table.find(consts, "FindFirstChild") then
+                            if table.find(consts, "wait") then
+                                handshake_func = conn.Function
+                                print("[Pulse] Found handshake function")
+                            elseif table.find(consts, "WalkSpeed") then
+                                update_func = conn.Function
+                                print("[Pulse] Found update function")
+                            end
+                        end
+                    end
+                end
+            end
+        end
+
+        for _, func in next, getgc() do
+            if type(func) == "function" and islclosure(func) then
+                local ok2, info = pcall(debug.getinfo, func)
+                if ok2 and info and info.source and info.source:find("PlayerModule") then
+                    local ok3, consts = pcall(getconstants, func)
+                    if ok3 and consts then
+                        if table.find(consts, 9000) then
+                            secondary_shuffle = func
+                            print("[Pulse] Found secondary shuffle")
+                        elseif table.find(consts, 90000) then
+                            primary_shuffle = func
+                            print("[Pulse] Found primary shuffle")
+                        end
+                    end
+                end
+            end
+        end
+    end)()
+
+    -- Don't kick if functions not found - just warn and return (practice mode)
+    if not handshake_func or not primary_shuffle or not secondary_shuffle then
+        local missing = {}
+        if not handshake_func then table.insert(missing, "handshake") end
+        if not primary_shuffle then table.insert(missing, "primary_shuffle") end
+        if not secondary_shuffle then table.insert(missing, "secondary_shuffle") end
+        warn("[Pulse] AC not detected (practice mode?) - missing: " .. table.concat(missing, ", "))
+        return false
+    end
+
+    print("[Pulse] All functions found, setting up hooks...")
+
+    local whitelisted_seqs = {
+        {1655, 1775, 1633, 1724, 1891, 1666},
+        {1760, 1760, 1665, 1771, 1898, 1777},
+        {1660, 1759, 1863, 1751, 1771, 1866}
+    }
+
+    local secondary_seqs = {
+        {1777, 1686, 1864, 1699, 1785, 1786}
+    }
+
+    local old_primary
+    local ok, err = pcall(function()
+        old_primary = hookfunction(primary_shuffle, LPH_NO_VIRTUALIZE(function(...)
+            local args = {...}
+            if #args >= 9 then
+                local seq = {args[3], args[4], args[5], args[7], args[8], args[9]}
+                local pass = false
+                
+                for i = 1, #whitelisted_seqs do
+                    if table.compare(seq, whitelisted_seqs[i]) then
+                        pass = true
+                        break
+                    end
+                end
+
+                if PULSE_DEV_OUTPUT then
+                    if pass then
+                        print("[Pulse] PRIMARY PASS: " .. table.concat(seq, ", "))
+                    else
+                        warn("[Pulse] PRIMARY BLOCKED: " .. table.concat(seq, ", "))
+                    end
+                end
+
+                if pass then
+                    return old_primary(...)
+                else
+                    args[3], args[4], args[5], args[7], args[8], args[9] = whitelisted_seqs[1][1], whitelisted_seqs[1][2], whitelisted_seqs[1][3], whitelisted_seqs[1][4], whitelisted_seqs[1][5], whitelisted_seqs[1][6]
+                    return old_primary(unpack(args))
+                end
+            end
+            return old_primary(...)
+        end))
+    end)
+    if not ok then
+        pulseKick("Failed to hook primary shuffle: " .. tostring(err))
+        return false
+    end
+    print("[Pulse] Hooked primary shuffle")
+
+    local old_secondary
+    local ok, err = pcall(function()
+        old_secondary = hookfunction(secondary_shuffle, LPH_NO_VIRTUALIZE(function(...)
+            local args = {...}
+            if #args >= 9 then
+                local seq = {args[3], args[4], args[5], args[7], args[8], args[9]}
+                local block = false
+                
+                for i = 1, #secondary_seqs do
+                    if table.compare(seq, secondary_seqs[i]) then
+                        block = true
+                        break
+                    end
+                end
+
+                if PULSE_DEV_OUTPUT then
+                    if block then
+                        warn("[Pulse] SECONDARY BLOCKED: " .. table.concat(seq, ", "))
+                    else
+                        print("[Pulse] SECONDARY PASS: " .. table.concat(seq, ", "))
+                    end
+                end
+
+                if block then
+                    return
+                end
+            end
+            return old_secondary(...)
+        end))
+    end)
+    if not ok then
+        pulseKick("Failed to hook secondary shuffle: " .. tostring(err))
+        return false
+    end
+    print("[Pulse] Hooked secondary shuffle")
+
+    local old_handshake
+    local inHandshake = false
+    local isSetup = false
+    local bypassReady = false
+    local thisSequence = {}
+    local ShuffleSequence = {}
+    local content = nil
+    local ACRemote = nil
+    local otherRemote = nil
+    local otherShuffle = nil
+
+    local ok, err = pcall(function()
+        old_handshake = hookfunction(handshake_func, LPH_NO_VIRTUALIZE(function(identifier, ...)
+            inHandshake = true
+            if isSetup then
+                if identifier ~= content then
+                    return
+                end
+                task.wait()
+                primary_shuffle(unpack(ShuffleSequence[1]))
+                secondary_shuffle(unpack(ShuffleSequence[2]))
+                if otherRemote and otherShuffle then
+                    otherRemote.Name = ACRemote.Name
+                    otherRemote:FireServer(content, otherShuffle(unpack(otherSequence)), nil)
+                end
+                if ACRemote then
+                    ACRemote:FireServer(content, primary_shuffle(unpack(ShuffleSequence[1])), nil)
+                end
+                secondary_shuffle(unpack(ShuffleSequence[4]))
+                if otherRemote then
+                    otherRemote.Name = ""
+                end
+                bypassReady = true
+            else
+                thisSequence = {}
+                ShuffleSequence = {}
+                old_handshake(identifier, ...)
+                bypassReady = false
+            end
+            inHandshake = false
+        end))
+    end)
+    if not ok then
+        pulseKick("Failed to hook handshake: " .. tostring(err))
+        return false
+    end
+    print("[Pulse] Hooked handshake")
+
+    task.wait()
+
+    if update_func then
+        local last_tick = tick()
+        local old_update
+        local ok, err = pcall(function()
+            old_update = hookfunction(update_func, LPH_NO_VIRTUALIZE(function(id, state, payload)
+                task.wait()
+                local current_tick = tick()
+                if state and current_tick - last_tick > 9 then
+                    last_tick = current_tick
+                elseif not state or current_tick - last_tick > 1 then
+                    last_tick = current_tick
+                end
+                if payload and type(payload) == "table" and #payload > 0 then
+                    local new_payload = {}
+                    for i = 1, #payload do
+                        new_payload[i + 1] = payload[i]
+                    end
+                    task.wait()
+                    return old_update(id, state, new_payload)
+                end
+                task.wait()
+                return old_update(id, state, payload)
+            end))
+        end)
+        if not ok then
+            warn("[Pulse] Failed to hook update: " .. tostring(err))
+        else
+            print("[Pulse] Hooked update function")
+        end
+    end
+
+    local dummy_event = Instance.new("BindableEvent").Event
+    local heartbeat = RunService.Heartbeat
+    local render = RunService.RenderStepped
+    local stepped = RunService.Stepped
+    local killed = 0
+
+    for _, func in next, getgc() do
+        if type(func) == "function" and islclosure(func) then
+            pcall(function()
+                local info = debug.getinfo(func)
+                if not info or not info.source or not info.source:find("PlayerModule") then return end
+                local upvals = debug.getupvalues(func)
+                if not upvals then return end
+                for idx, upval in next, upvals do
+                    if upval == heartbeat or upval == render or upval == stepped then
+                        debug.setupvalue(func, idx, dummy_event)
+                        killed = killed + 1
+                    end
+                end
+            end)
+        end
+    end
+    print("[Pulse] Killed " .. killed .. " crash functions")
+
+    task.wait()
+
+    local namecall
+    local ok, err = pcall(function()
+        namecall = hookfunction(getrawmetatable(game).__namecall, LPH_NO_VIRTUALIZE(function(self, ...)
+            local method = getnamecallmethod()
+            if not checkcaller() and method == "FindFirstChild" then
+                local arg1, arg2 = ...
+                if arg1 == "topcontainer" and arg2 == true then
+                    return nil
+                end
+                if arg1 == "\0" then
+                    return nil
+                end
+            end
+            return namecall(self, ...)
+        end))
+    end)
+    if not ok then
+        warn("[Pulse] Failed to hook __namecall: " .. tostring(err))
+    else
+        print("[Pulse] Hooked __namecall")
+    end
+
+    print("[Pulse] Loaded successfully!")
+    return true
+end
+
+local pulseLoaded = initPulse()
+
+if pulseLoaded then
+    print("[Pulse] Bypass Active")
+else
+    print("[Pulse] Practice Detected!")
+end
