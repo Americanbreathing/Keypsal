@@ -521,6 +521,8 @@ async def help_command(interaction: discord.Interaction):
         embed.add_field(name="--- OWNER ONLY ---", value="\u200b", inline=False)
         embed.add_field(name="/addseller @user", value="Authorize a user to sell keys", inline=False)
         embed.add_field(name="/removeseller @user", value="Revoke seller permissions", inline=False)
+        embed.add_field(name="/reassignall [days] [revoke_old]", value="Generate new keys for ALL customers", inline=False)
+        embed.add_field(name="/backup", value="Download database backup", inline=False)
         
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -544,6 +546,89 @@ async def backup(interaction: discord.Interaction):
         
     except Exception as e:
         await interaction.followup.send(f"❌ Backup failed: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="reassignall", description="Generate new keys for all members with Customer role (Owner Only)")
+@app_commands.describe(
+    days="Duration for new keys (default 30, use 999 for lifetime)",
+    revoke_old="Revoke old keys before generating new ones (default True)"
+)
+async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_old: bool = True):
+    # STRICT OWNER CHECK - Sellers cannot use this
+    if not is_owner(interaction):
+        await interaction.response.send_message("❌ This command is restricted to **Owners only**. Sellers cannot use this.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        guild = interaction.guild
+        role = guild.get_role(CUSTOMER_ROLE_ID)
+        
+        if not role:
+            await interaction.followup.send(f"❌ Customer role (ID: {CUSTOMER_ROLE_ID}) not found!", ephemeral=True)
+            return
+        
+        # Get all members with the Customer role
+        members_with_role = [m for m in guild.members if role in m.roles]
+        
+        if not members_with_role:
+            await interaction.followup.send("❌ No members found with the Customer role.", ephemeral=True)
+            return
+        
+        # Confirm action
+        count = len(members_with_role)
+        
+        # Process each member
+        success = 0
+        failed = 0
+        
+        for member in members_with_role:
+            try:
+                # Optionally revoke old keys
+                if revoke_old:
+                    with get_db_connection() as conn:
+                        conn.execute("UPDATE licenses SET status = 'revoked' WHERE discord_id = ? AND status != 'revoked'", 
+                                   (str(member.id),))
+                
+                # Generate new key
+                key, expiry = generate_license("UNBOUND", days)
+                
+                with get_db_connection() as conn:
+                    conn.execute('''INSERT INTO licenses (discord_id, discord_name, key, created_at, expires_at)
+                                 VALUES (?, ?, ?, ?, ?)''',
+                              (str(member.id), str(member), key, int(time.time()), expiry))
+                
+                # Try to DM the user their new key
+                try:
+                    expiry_str = "Lifetime" if days >= 999 else f"<t:{expiry}:R>"
+                    dm_embed = discord.Embed(title="🔑 New PXHB License Key", color=0x00ff00)
+                    dm_embed.description = "Your license has been reassigned. Here's your new key:"
+                    dm_embed.add_field(name="Key", value=f"```{key}```", inline=False)
+                    dm_embed.add_field(name="Expires", value=expiry_str, inline=True)
+                    dm_embed.set_footer(text="Paste this key into the script to activate.")
+                    await member.send(embed=dm_embed)
+                except:
+                    pass  # DMs disabled
+                
+                success += 1
+                
+            except Exception as e:
+                print(f"[ReassignAll Error] Failed for {member}: {e}")
+                failed += 1
+        
+        # Report results
+        embed = discord.Embed(title="✅ Bulk Key Reassignment Complete", color=0x00ff00)
+        embed.add_field(name="Total Members", value=str(count), inline=True)
+        embed.add_field(name="Successful", value=str(success), inline=True)
+        embed.add_field(name="Failed", value=str(failed), inline=True)
+        embed.add_field(name="Key Duration", value=f"{days} days" if days < 999 else "Lifetime", inline=True)
+        embed.add_field(name="Old Keys Revoked", value="Yes" if revoke_old else "No", inline=True)
+        embed.set_footer(text="New keys have been DMed to users (if DMs enabled).")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 # ==============================================================================
 # INTERACTIVE PANEL (Replaces Web Portal)
