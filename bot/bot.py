@@ -630,6 +630,15 @@ async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_o
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
+@bot.tree.command(name="reassignkeyall", description="ALIAS: Generate new keys for all members (Owner Only)")
+@app_commands.describe(
+    days="Duration for new keys (default 30, use 999 for lifetime)",
+    revoke_old="Revoke old keys before generating new ones (default True)"
+)
+async def reassignkeyall(interaction: discord.Interaction, days: int = 30, revoke_old: bool = True):
+    """Alias for reassignall"""
+    await reassignall(interaction, days, revoke_old)
+
 # ==============================================================================
 # INTERACTIVE PANEL (Replaces Web Portal)
 # ==============================================================================
