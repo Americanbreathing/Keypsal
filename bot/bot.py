@@ -552,7 +552,8 @@ async def backup(interaction: discord.Interaction):
     days="Duration for new keys (default 30, use 999 for lifetime)",
     revoke_old="Revoke old keys before generating new ones (default True)"
 )
-async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_old: bool = True):
+# Shared logic for reassignall commands
+async def _reassign_logic(interaction: discord.Interaction, days: int, revoke_old: bool):
     # STRICT OWNER CHECK - Sellers cannot use this
     if not is_owner(interaction):
         await interaction.response.send_message("❌ This command is restricted to **Owners only**. Sellers cannot use this.", ephemeral=True)
@@ -630,6 +631,14 @@ async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_o
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
+@bot.tree.command(name="reassignall", description="Generate new keys for all members with Customer role (Owner Only)")
+@app_commands.describe(
+    days="Duration for new keys (default 30, use 999 for lifetime)",
+    revoke_old="Revoke old keys before generating new ones (default True)"
+)
+async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_old: bool = True):
+    await _reassign_logic(interaction, days, revoke_old)
+
 @bot.tree.command(name="reassignkeyall", description="ALIAS: Generate new keys for all members (Owner Only)")
 @app_commands.describe(
     days="Duration for new keys (default 30, use 999 for lifetime)",
@@ -637,7 +646,7 @@ async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_o
 )
 async def reassignkeyall(interaction: discord.Interaction, days: int = 30, revoke_old: bool = True):
     """Alias for reassignall"""
-    await reassignall(interaction, days, revoke_old)
+    await _reassign_logic(interaction, days, revoke_old)
 
 # ==============================================================================
 # INTERACTIVE PANEL (Replaces Web Portal)
