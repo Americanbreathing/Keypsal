@@ -547,11 +547,6 @@ async def backup(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"❌ Backup failed: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="reassignall", description="Generate new keys for all members with Customer role (Owner Only)")
-@app_commands.describe(
-    days="Duration for new keys (default 30, use 999 for lifetime)",
-    revoke_old="Revoke old keys before generating new ones (default True)"
-)
 # Shared logic for reassignall commands
 async def _reassign_logic(interaction: discord.Interaction, days: int, revoke_old: bool):
     # STRICT OWNER CHECK - Sellers cannot use this
