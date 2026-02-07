@@ -643,6 +643,51 @@ async def reassignkeyall(interaction: discord.Interaction, days: int = 30, revok
     """Alias for reassignall"""
     await _reassign_logic(interaction, days, revoke_old)
 
+@bot.tree.command(name="update", description="Announce a new update to the community (Owner Only)")
+@app_commands.describe(
+    product="Which product was updated?",
+    version="New version number (e.g. 2.3.0)",
+    changes="List of changes (Use + for add, - for remove, ! for fix)",
+    ping="Ping all customers? (True/False)"
+)
+@app_commands.choices(product=[
+    app_commands.Choice(name="FF2 Script", value="FF2 Script"),
+    app_commands.Choice(name="PXHB External", value="PXHB External"),
+    app_commands.Choice(name="All Products", value="All Products")
+])
+async def update_announcement(interaction: discord.Interaction, product: app_commands.Choice[str], version: str, changes: str, ping: bool = True):
+    # STRICT OWNER CHECK
+    if not is_owner(interaction):
+        await interaction.response.send_message("❌ This command is restricted to **Owners only**.", ephemeral=True)
+        return
+    
+    # 1. Format the changes for the Code Block
+    # Ensure purely string input is handled gracefully
+    formatted_changes = changes.replace("\\n", "\n") 
+    
+    # 2. Build the Embed
+    embed = discord.Embed(
+        title=f"🚀 {product.value} Update {version}",
+        description=f"```diff\n{formatted_changes}\n```",
+        color=0xFFA500, # Gold/Orange for updates
+        timestamp=datetime.now()
+    )
+    
+    embed.set_footer(text=f"Update pushed by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+    embed.set_thumbnail(url=bot.user.display_avatar.url) # Bot logo
+    
+    # 3. Determine Ping
+    content = ""
+    if ping:
+        content = f"<@&{CUSTOMER_ROLE_ID}>" # Ping Customer Role
+    
+    # 4. Send
+    # We use channel.send to ensure the ping actually notifies people (interactions sometimes suppress pings)
+    # But we need to respond to the interaction too.
+    
+    await interaction.response.send_message("✅ Announcement sent!", ephemeral=True)
+    await interaction.channel.send(content=content, embed=embed)
+
 # ==============================================================================
 # INTERACTIVE PANEL (Replaces Web Portal)
 # ==============================================================================
