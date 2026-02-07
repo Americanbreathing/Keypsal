@@ -915,7 +915,168 @@ async def on_ready():
     
     # Start background tasks
     check_expirations.start()
+    # Start background tasks
+    check_expirations.start()
     asyncio.create_task(start_webhook_server())
+
+# ==============================================================================
+# ROBLOX API HELPERS
+# ==============================================================================
+class RobloxAPI:
+    @staticmethod
+    async def get_user_id(username_or_link: str):
+        """Resolves a Roblox Username or Profile Link to a User ID."""
+        username_or_link = username_or_link.strip()
+        
+        # Extract ID from link if provided
+        if "roblox.com/users/" in username_or_link:
+            try:
+                # https://www.roblox.com/users/123456/profile -> 123456
+                return int(username_or_link.split("users/")[1].split("/")[0])
+            except:
+                pass # Fallback to name lookup if regex fails
+        
+        # Assume it's a username if not a link (or link parse failed)
+        # Verify via API
+        async with aiohttp.ClientSession() as session:
+            payload = {"usernames": [username_or_link], "excludeBannedUsers": True}
+            async with session.post("https://users.roblox.com/v1/usernames/users", json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data['data']:
+                        return data['data'][0]['id']
+        return None
+
+    @staticmethod
+    async def check_gamepass(user_id: int, gamepass_id: int):
+        """Checks if a user owns a specific gamepass."""
+        if not user_id or not gamepass_id:
+            return False
+            
+        url = f"https://inventory.roblox.com/v1/users/{user_id}/items/1/gamepass/{gamepass_id}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get('data') and len(data['data']) > 0
+        return False
+
+# ==============================================================================
+# SALES FLOW (STATE MACHINE)
+# ==============================================================================
+# PLACEHOLDER IDs - REPLACE THESE!
+GAMEPASS_ID_EXTERNAL = 1703423654 
+GAMEPASS_ID_FF2 = 87654321
+
+class VerifyPurchaseView(discord.ui.View):
+    def __init__(self, roblox_id, product_name):
+        super().__init__(timeout=None)
+        self.roblox_id = roblox_id
+        self.product_name = product_name
+        self.gamepass_id = GAMEPASS_ID_EXTERNAL if product_name == "External" else GAMEPASS_ID_FF2
+
+    @discord.ui.button(label="Verify Purchase", style=discord.ButtonStyle.success, emoji="✅")
+    async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        
+        owns = await RobloxAPI.check_gamepass(self.roblox_id, self.gamepass_id)
+        
+        # Bypass for testing (Remove in production!)
+        # owns = True 
+        
+        if owns:
+            # Generate Key
+            key, expiry = generate_license("UNBOUND", 30) # 30 Days default
+            
+            # Save to DB
+            with get_db_connection() as conn:
+                conn.execute('''INSERT INTO licenses (discord_id, discord_name, key, created_at, expires_at, roblox_id)
+                             VALUES (?, ?, ?, ?, ?, ?)''',
+                          (str(interaction.user.id), str(interaction.user), key, int(time.time()), expiry, str(self.roblox_id)))
+            
+            # Assign Role
+            await check_and_update_role(interaction.guild, interaction.user.id)
+            
+            embed = discord.Embed(title="🎉 Purchase Verified!", color=0x00FF00)
+            embed.description = f"Thank you for purchasing **{self.product_name}**!"
+            embed.add_field(name="Your License Key", value=f"```{key}```", inline=False)
+            embed.set_footer(text="The Customer role has been added to your account.")
+            
+            # Send to user (Ephemeral) + Channel
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.channel.send(f"{interaction.user.mention} Purchase verified! Check your hidden reply for the key.")
+            
+            # Disable buttons
+            for child in self.children:
+                child.disabled = True
+            await interaction.message.edit(view=self)
+            
+        else:
+            await interaction.followup.send("❌ Gamepass not found in your inventory. Please ensure your inventory is public and try again in 30 seconds.", ephemeral=True)
+
+class ProfileModal(discord.ui.Modal, title="Roblox Verification"):
+    def __init__(self, product_name):
+        super().__init__()
+        self.product_name = product_name
+
+    link = discord.ui.TextInput(
+        label="Roblox Profile Link",
+        placeholder="https://www.roblox.com/users/123456/profile",
+        required=True
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        roblox_id = await RobloxAPI.get_user_id(self.link.value)
+        
+        if not roblox_id:
+            await interaction.response.send_message("❌ Could not resolve Roblox User. Please check the link.", ephemeral=True)
+            return
+            
+        gamepass_id = GAMEPASS_ID_EXTERNAL if self.product_name == "External" else GAMEPASS_ID_FF2
+        gamepass_link = f"https://www.roblox.com/game-pass/{gamepass_id}"
+        
+        embed = discord.Embed(title="Step 3: Purchase", color=0x5865F2)
+        embed.description = f"Please purchase the **{self.product_name}** Gamepass below.\n\n[👉 Click Here to Buy Gamepass]({gamepass_link})\n\n**Once purchased, click Verified!**"
+        
+        await interaction.response.send_message(embed=embed, view=VerifyPurchaseView(roblox_id, self.product_name), ephemeral=False) # Public so they see it
+
+class ProductSelectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="External", style=discord.ButtonStyle.primary, emoji="⚡")
+    async def external(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Check Role
+        role = interaction.guild.get_role(CUSTOMER_ROLE_ID)
+        if role and role in interaction.user.roles:
+           await interaction.response.send_message("You already have the Customer role!", ephemeral=True)
+           # return # Optional: Stop them or let them buy again
+
+        await interaction.response.send_modal(ProfileModal("External"))
+
+    @discord.ui.button(label="FF2 Script", style=discord.ButtonStyle.secondary, emoji="📜")
+    async def ff2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ProfileModal("FF2 Script"))
+
+# ==============================================================================
+# TICKET AUTOMATION
+# ==============================================================================
+@bot.event
+async def on_guild_channel_create(channel):
+    """Detects new ticket channels and sends the sales menu."""
+    if not isinstance(channel, discord.TextChannel):
+        return
+        
+    if "buyer" in channel.name.lower():
+        # Wait a moment for permissions/hooks to settle
+        await asyncio.sleep(2)
+        
+        embed = discord.Embed(
+            title="👋 Welcome to Support",
+            description="Hello! I see you're interested in purchasing.\n**What would you like to buy?**",
+            color=0x5865F2
+        )
+        await channel.send(embed=embed, view=ProductSelectView())
 
 # Run Bot
 if __name__ == "__main__":
