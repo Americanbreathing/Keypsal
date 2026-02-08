@@ -92,19 +92,24 @@ task.spawn(function()
         return
     end
 
-    if response.StatusCode ~= 200 then
-        local data
-        local success, decoded = pcall(function()
-            return HttpService:JSONDecode(response.Body)
-        end)
-        
-        if success then
-            data = decoded
-        else
-            data = { error = "Server Error (" .. tostring(response.StatusCode) .. "): " .. tostring(response.Body) }
+    -- Parse JSON response
+    local data
+    local jsonSuccess, decoded = pcall(function()
+        return HttpService:JSONDecode(response.Body)
+    end)
+    
+    if jsonSuccess then
+        data = decoded
+    else
+        data = { success = false, error = "Server Error: Invalid JSON response" }
+    end
+
+    -- Logical Check: Success MUST be true
+    if not data.success or response.StatusCode ~= 200 then
+        local err = data.error or "Unknown Error"
+        if response.StatusCode ~= 200 then
+            err = err .. " (" .. tostring(response.StatusCode) .. ")"
         end
-        
-        local err = data.error or "Unknown Error (" .. tostring(response.StatusCode) .. ")"
         
         if err == "HWID Mismatch" then
             LocalPlayer:Kick("PXHB Security: HWID Mismatch! Key locked to another PC.")
