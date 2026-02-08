@@ -842,6 +842,85 @@ async def panel(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=view)
 
 # Register persistent view on bot startup
+
+class ExternalPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        self.add_item(discord.ui.Button(
+            label="Download External", 
+            emoji="??", 
+            style=discord.ButtonStyle.link, 
+            url="https://github.com/Americanbreathing/Keypsal/releases/latest/download/PXHB_External_v1.0_RELEASE.zip"
+        ))
+
+    @discord.ui.button(label="HWID Reset", emoji="???", style=discord.ButtonStyle.primary, custom_id="ext_hwid_reset")
+    async def hwid_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            user_id = str(interaction.user.id)
+            current_time = int(time.time())
+            cooldown_days = 7
+            cooldown_seconds = cooldown_days * 24 * 60 * 60
+            
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''SELECT id, key, hwid, last_hwid_reset, expires_at 
+                                FROM licenses WHERE discord_id = ? AND status != 'revoked' AND expires_at > ?
+                                ORDER BY created_at DESC LIMIT 1''', (user_id, current_time))
+                result = cursor.fetchone()
+            
+            if not result:
+                embed = discord.Embed(title="? No Active License", description="You need an active license to reset HWID.", color=0xFF5555)
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+            
+            license_id, key, hwid, last_reset, expires_at = result
+            
+            if last_reset and (current_time - last_reset) < cooldown_seconds:
+                remaining = cooldown_seconds - (current_time - last_reset)
+                days, hours = remaining // 86400, (remaining % 86400) // 3600
+                embed = discord.Embed(title="? HWID Reset Cooldown", description=f"You can reset your HWID in **{days}d {hours}h**.", color=0xFFAA00)
+                await interaction.followup.send(embed=embed, ephemeral=True)
+                return
+            
+            with get_db_connection() as conn:
+                conn.execute('''UPDATE licenses SET hwid = 'UNBOUND', last_hwid_reset = ? WHERE id = ?''', (current_time, license_id))
+            
+            embed = discord.Embed(title="? HWID Reset Successful", description="Your HWID has been reset! Launch PXHB_External.exe on your new PC.", color=0x55FF55)
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"? Error: {str(e)}", ephemeral=True)
+
+    @discord.ui.button(label="Setup Guide", emoji="??", style=discord.ButtonStyle.secondary, custom_id="ext_guide")
+    async def setup_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="?? External Setup Guide", color=0x5865F2)
+        embed.description = (
+            "Follow these steps to get PXHB External running:\n\n"
+            "1. **Download External**: Click 'Download External' button above\n"
+            "2. **Extract ZIP**: Extract all files to a folder\n"
+            "3. **Launch Roblox**: Open Roblox and join any supported game\n"
+            "4. **Run External**: Open PXHB_External.exe and enter your license key\n"
+            "5. **Enjoy**: The overlay will appear once authenticated!"
+        )
+        embed.add_field(name="?? Important", value="Keep the folder structure intact! Don't move files.", inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="extpanel", description="Send the External Support panel (Owner Only)")
+async def extpanel(interaction: discord.Interaction):
+    if not is_owner(interaction):
+        await interaction.response.send_message("? This command is restricted to **Owners**.", ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title="?? PXHB External Download",
+        description="Download and setup PXHB External cheat.\n\nClick the button below to download the latest version.",
+        color=0x5865F2
+    )
+    embed.add_field(name="What's Included", value="? Self-contained exe (no .NET needed)\n? Pattern scanner (PXHB.dll)\n? Offset files\n? Setup guide", inline=False)
+    embed.set_footer(text="Need help? Click 'Setup Guide' after downloading.")
+    
+    view = ExternalPanelView()
+    await interaction.response.send_message(embed=embed, view=view)
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
