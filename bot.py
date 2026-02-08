@@ -952,28 +952,15 @@ class RobloxAPI:
     async def check_gamepass(user_id: int, gamepass_id: int):
         """Checks if a user owns a specific gamepass."""
         if not user_id or not gamepass_id:
-            print(f"[API] Missing user_id or gamepass_id: {user_id}, {gamepass_id}")
-            return False, "Missing Data"
+            return False
             
         url = f"https://inventory.roblox.com/v1/users/{user_id}/items/1/gamepass/{gamepass_id}"
-        print(f"[API] Checking URL: {url}")
-        
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    print(f"[API] Response Status: {resp.status}")
-                    if resp.status == 200:
-                        data = await resp.json()
-                        print(f"[API] Response Data: {data}")
-                        is_owned = data.get('data') and len(data['data']) > 0
-                        return is_owned, "OK"
-                    else:
-                        text = await resp.text()
-                        print(f"[API] Error Body: {text}")
-                        return False, f"API Error: {resp.status}"
-        except Exception as e:
-            print(f"[API] Exception: {e}")
-            return False, f"Exception: {str(e)}"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get('data') and len(data['data']) > 0
+        return False
 
 # ==============================================================================
 # SALES FLOW (STATE MACHINE)
@@ -991,11 +978,12 @@ class VerifyPurchaseView(discord.ui.View):
 
     @discord.ui.button(label="Verify Purchase", style=discord.ButtonStyle.success, emoji="✅")
     async def verify(self, interaction: discord.Interaction, button: discord.ui.Button):
-        print(f"[Verify] User {interaction.user} checking Roblox ID {self.roblox_id} for Gamepass {self.gamepass_id}")
         await interaction.response.defer(ephemeral=True)
         
-        owns, debug_msg = await RobloxAPI.check_gamepass(self.roblox_id, self.gamepass_id)
-        print(f"[Verify] Result: {owns}, Msg: {debug_msg}")
+        owns = await RobloxAPI.check_gamepass(self.roblox_id, self.gamepass_id)
+        
+        # Bypass for testing (Remove in production!)
+        # owns = True 
         
         if owns:
             # Generate Key
@@ -1025,7 +1013,7 @@ class VerifyPurchaseView(discord.ui.View):
             await interaction.message.edit(view=self)
             
         else:
-            await interaction.followup.send(f"❌ Verification Failed.\n**Reason:** Gamepass not found in inventory.\n**Debug Info:** {debug_msg}\n\n*Make sure your inventory is PUBLIC.*", ephemeral=True)
+            await interaction.followup.send("❌ Gamepass not found in your inventory. Please ensure your inventory is public and try again in 30 seconds.", ephemeral=True)
 
 class ProfileModal(discord.ui.Modal, title="Roblox Verification"):
     def __init__(self, product_name):
