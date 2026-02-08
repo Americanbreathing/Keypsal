@@ -88,6 +88,9 @@ async def init_db():
 # ==============================================================================
 async def check_and_update_role(guild, user_id):
     """Checks if a user has any valid licenses and updates their role accordingly."""
+    if not db_pool:
+        return
+        
     try:
         current_time = int(time.time())
         has_active = False
@@ -182,6 +185,10 @@ async def send_security_alert(discord_id, key, hwid, old_hwid, rid, old_rid, rea
 async def handle_verify(request):
     """Strict key verification: checks HWID, RobloxID, expiration."""
     try:
+        if not db_pool:
+            print("[Verify Error] Database pool is not initialized!")
+            return web.json_response({'success': False, 'error': 'Database Offline'}, status=200)
+
         data = await request.json()
         print(f"[Verify] Request: {data}")
         key = data.get('key')
@@ -234,6 +241,9 @@ async def handle_verify(request):
 # Legacy endpoint for old clients (just activates pending keys)
 async def handle_activation(request):
     try:
+        if not db_pool:
+            return web.json_response({'success': False, 'error': 'Database Offline'}, status=500)
+
         data = await request.json()
         key = data.get('key')
         hwid = data.get('hwid')
@@ -276,6 +286,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Periodically check for expired licenses and remove roles
 @tasks.loop(minutes=30)
 async def check_expirations():
+    if not db_pool:
+        # print("[Task] Database pool not ready, skipping check.")
+        return
+        
     print("[Task] Checking for license expirations...")
     try:
         # Get all unique discord IDs in the database
@@ -301,6 +315,9 @@ async def is_seller(interaction: discord.Interaction):
     """Checks if the user is a registered seller or an admin/owner."""
     if is_owner(interaction):
         return True
+    
+    if not db_pool:
+        return False
         
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow("SELECT 1 FROM sellers WHERE discord_id = $1", str(interaction.user.id))
