@@ -915,9 +915,8 @@ async def on_ready():
         print(f'Sync error: {e}')
     
     # Start background tasks
-    check_expirations.start()
-    # Start background tasks
-    check_expirations.start()
+    if not check_expirations.is_running():
+        check_expirations.start()
     asyncio.create_task(start_webhook_server())
 
 # ==============================================================================
