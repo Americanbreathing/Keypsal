@@ -37,9 +37,9 @@ OWNER_ROLE_ID = 1456538170869944414 # Owner Role ID
 SCRIPT_VERSION = "2.2.0"
 LAST_UPDATE = "February 2, 2026 1:30 AM EST"
 CHANGELOG = [
-    "ðŸ”’ NEW: Strict HWID + Roblox ID verification",
-    "ðŸ”’ NEW: Anti key-sharing detection",
-    "ðŸ”’ NEW: Admin security alerts",
+    "🔒 NEW: Strict HWID + Roblox ID verification",
+    "🔒 NEW: Anti key-sharing detection",
+    "🔒 NEW: Admin security alerts",
     "Fixed AC Bypasser timing (3s init delay)",
     "Console cleaner active"
 ]
@@ -172,7 +172,7 @@ async def send_security_alert(discord_id, key, hwid, old_hwid, rid, old_rid, rea
             print(f"[Alert Error] Channel {ALERT_CHANNEL_ID} not found")
             return
             
-        embed = discord.Embed(title="ðŸš¨ SECURITY ALERT: Key Compromised", color=0xFF0000)
+        embed = discord.Embed(title="🚨 SECURITY ALERT: Key Compromised", color=0xFF0000)
         embed.add_field(name="Reason", value=f"**{reason}**", inline=False)
         embed.add_field(name="User ID", value=f"`{discord_id}` (<@{discord_id}>)", inline=True)
         embed.add_field(name="Key", value=f"||{key[:20]}...||", inline=True)
@@ -330,14 +330,14 @@ async def is_seller(interaction: discord.Interaction):
 @app_commands.describe(user="The Discord user to authorize as a seller")
 async def addseller(interaction: discord.Interaction, user: discord.Member):
     if not is_owner(interaction):
-        await interaction.response.send_message("âŒ This command is restricted to **Owners**.", ephemeral=True)
+        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
         return
         
     try:
         with get_db_connection() as conn:
             conn.execute("INSERT OR REPLACE INTO sellers (discord_id, discord_name, added_at) VALUES (?, ?, ?)",
                       (str(user.id), str(user), int(time.time())))
-        await interaction.response.send_message(f"âœ… {user.mention} is now an authorized **Seller**.", ephemeral=True)
+        await interaction.response.send_message(f"✅ {user.mention} is now an authorized **Seller**.", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
@@ -345,7 +345,7 @@ async def addseller(interaction: discord.Interaction, user: discord.Member):
 @app_commands.describe(user="The Discord user to remove from sellers")
 async def removeseller(interaction: discord.Interaction, user: discord.User):
     if not is_owner(interaction):
-        await interaction.response.send_message("âŒ This command is restricted to **Owners**.", ephemeral=True)
+        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
         return
         
     try:
@@ -355,9 +355,9 @@ async def removeseller(interaction: discord.Interaction, user: discord.User):
             count = cursor.rowcount
             
         if count > 0:
-            await interaction.response.send_message(f"âœ… Removed {user.mention} from authorized sellers.", ephemeral=True)
+            await interaction.response.send_message(f"✅ Removed {user.mention} from authorized sellers.", ephemeral=True)
         else:
-            await interaction.response.send_message(f"âŒ {user.mention} was not a registered seller.", ephemeral=True)
+            await interaction.response.send_message(f"❌ {user.mention} was not a registered seller.", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"Error: {e}", ephemeral=True)
 
@@ -369,7 +369,7 @@ async def removeseller(interaction: discord.Interaction, user: discord.User):
 @app_commands.describe(user="The Discord user to generate a key for", days="Duration in days (999 for lifetime)")
 async def genkey(interaction: discord.Interaction, user: discord.User, days: int = 30):
     if not await is_seller(interaction):
-        await interaction.response.send_message("âŒ Access Denied: You are not an authorized **Seller**.", ephemeral=True)
+        await interaction.response.send_message("❌ Access Denied: You are not an authorized **Seller**.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
     
@@ -395,7 +395,7 @@ async def genkey(interaction: discord.Interaction, user: discord.User, days: int
         embed = discord.Embed(title="License Generated", color=0x00ff00)
         embed.add_field(name="User", value=user.mention, inline=False)
         embed.add_field(name="Duration", value=f"{days} Days ({expiry_str})", inline=True)
-        embed.add_field(name="Status", value="â³ Pending Activation", inline=True)
+        embed.add_field(name="Status", value="⏳ Pending Activation", inline=True)
         embed.add_field(name="License Key", value=f"```{key}```", inline=False)
         embed.set_footer(text="User has been assigned the Customer role.")
         
@@ -418,7 +418,7 @@ async def genkey(interaction: discord.Interaction, user: discord.User, days: int
 @app_commands.describe(user="The Discord user to check")
 async def userinfo(interaction: discord.Interaction, user: discord.User):
     if not await is_seller(interaction):
-        await interaction.response.send_message("âŒ Access Denied.", ephemeral=True)
+        await interaction.response.send_message("❌ Access Denied.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
     
@@ -435,7 +435,7 @@ async def userinfo(interaction: discord.Interaction, user: discord.User):
         embed = discord.Embed(title=f"Licenses for {user.name}", color=0x5865F2)
         
         for lic in licenses:
-            status_emoji = {"pending": "â³", "active": "âœ…", "revoked": "âŒ"}.get(lic[5], "â“")
+            status_emoji = {"pending": "⏳", "active": "✅", "revoked": "❌"}.get(lic[5], "❓")
             hwid_display = lic[4][:16] + "..." if lic[4] else "Not activated"
             expires = datetime.fromtimestamp(lic[8]).strftime("%Y-%m-%d") if lic[8] < 9999999999 else "Lifetime"
             
@@ -454,7 +454,7 @@ async def userinfo(interaction: discord.Interaction, user: discord.User):
 @app_commands.describe(user="The Discord user whose license to revoke")
 async def revoke(interaction: discord.Interaction, user: discord.User):
     if not await is_seller(interaction):
-        await interaction.response.send_message("âŒ Access Denied.", ephemeral=True)
+        await interaction.response.send_message("❌ Access Denied.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
     
@@ -468,7 +468,7 @@ async def revoke(interaction: discord.Interaction, user: discord.User):
         await check_and_update_role(interaction.guild, user.id)
         
         if count > 0:
-            await interaction.followup.send(f"âœ… Revoked {count} license(s) for {user.mention}. Role updated.", ephemeral=True)
+            await interaction.followup.send(f"✅ Revoked {count} license(s) for {user.mention}. Role updated.", ephemeral=True)
         else:
             await interaction.followup.send(f"{user.mention} has no active licenses to revoke.", ephemeral=True)
         
@@ -478,7 +478,7 @@ async def revoke(interaction: discord.Interaction, user: discord.User):
 @bot.tree.command(name="stats", description="View license statistics")
 async def stats(interaction: discord.Interaction):
     if not await is_seller(interaction):
-        await interaction.response.send_message("âŒ Access Denied.", ephemeral=True)
+        await interaction.response.send_message("❌ Access Denied.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
     
@@ -500,9 +500,9 @@ async def stats(interaction: discord.Interaction):
         
         embed = discord.Embed(title="License Statistics", color=0x5865F2)
         embed.add_field(name="Total Keys", value=str(total), inline=True)
-        embed.add_field(name="âœ… Active", value=str(active), inline=True)
-        embed.add_field(name="â³ Pending", value=str(pending), inline=True)
-        embed.add_field(name="âŒ Revoked", value=str(revoked), inline=True)
+        embed.add_field(name="✅ Active", value=str(active), inline=True)
+        embed.add_field(name="⏳ Pending", value=str(pending), inline=True)
+        embed.add_field(name="❌ Revoked", value=str(revoked), inline=True)
         
         await interaction.followup.send(embed=embed, ephemeral=True)
         
@@ -529,7 +529,7 @@ async def help_command(interaction: discord.Interaction):
 @bot.tree.command(name="backup", description="Download a backup of the license database (Owner Only)")
 async def backup(interaction: discord.Interaction):
     if not is_owner(interaction):
-        await interaction.response.send_message("âŒ This command is restricted to **Owners**.", ephemeral=True)
+        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
         return
     
     try:
@@ -537,15 +537,15 @@ async def backup(interaction: discord.Interaction):
         
         # Check if database file exists
         if not os.path.exists(DB_NAME):
-            await interaction.followup.send("âŒ Database file not found!", ephemeral=True)
+            await interaction.followup.send("❌ Database file not found!", ephemeral=True)
             return
         
         # Send the database file as an attachment
         file = discord.File(DB_NAME, filename=f"licenses_backup_{int(time.time())}.db")
-        await interaction.followup.send("âœ… **Database Backup**\nHere's your backup file:", file=file, ephemeral=True)
+        await interaction.followup.send("✅ **Database Backup**\nHere's your backup file:", file=file, ephemeral=True)
         
     except Exception as e:
-        await interaction.followup.send(f"âŒ Backup failed: {str(e)}", ephemeral=True)
+        await interaction.followup.send(f"❌ Backup failed: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="reassignall", description="Generate new keys for all members with Customer role (Owner Only)")
 @app_commands.describe(
@@ -555,7 +555,7 @@ async def backup(interaction: discord.Interaction):
 async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_old: bool = True):
     # STRICT OWNER CHECK - Sellers cannot use this
     if not is_owner(interaction):
-        await interaction.response.send_message("âŒ This command is restricted to **Owners only**. Sellers cannot use this.", ephemeral=True)
+        await interaction.response.send_message("❌ This command is restricted to **Owners only**. Sellers cannot use this.", ephemeral=True)
         return
     
     await interaction.response.defer(ephemeral=True)
@@ -565,14 +565,14 @@ async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_o
         role = guild.get_role(CUSTOMER_ROLE_ID)
         
         if not role:
-            await interaction.followup.send(f"âŒ Customer role (ID: {CUSTOMER_ROLE_ID}) not found!", ephemeral=True)
+            await interaction.followup.send(f"❌ Customer role (ID: {CUSTOMER_ROLE_ID}) not found!", ephemeral=True)
             return
         
         # Get all members with the Customer role
         members_with_role = [m for m in guild.members if role in m.roles]
         
         if not members_with_role:
-            await interaction.followup.send("âŒ No members found with the Customer role.", ephemeral=True)
+            await interaction.followup.send("❌ No members found with the Customer role.", ephemeral=True)
             return
         
         # Confirm action
@@ -601,7 +601,7 @@ async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_o
                 # Try to DM the user their new key
                 try:
                     expiry_str = "Lifetime" if days >= 999 else f"<t:{expiry}:R>"
-                    dm_embed = discord.Embed(title="ðŸ”‘ New PXHB License Key", color=0x00ff00)
+                    dm_embed = discord.Embed(title="🔑 New PXHB License Key", color=0x00ff00)
                     dm_embed.description = "Your license has been reassigned. Here's your new key:"
                     dm_embed.add_field(name="Key", value=f"```{key}```", inline=False)
                     dm_embed.add_field(name="Expires", value=expiry_str, inline=True)
@@ -617,7 +617,7 @@ async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_o
                 failed += 1
         
         # Report results
-        embed = discord.Embed(title="âœ… Bulk Key Reassignment Complete", color=0x00ff00)
+        embed = discord.Embed(title="✅ Bulk Key Reassignment Complete", color=0x00ff00)
         embed.add_field(name="Total Members", value=str(count), inline=True)
         embed.add_field(name="Successful", value=str(success), inline=True)
         embed.add_field(name="Failed", value=str(failed), inline=True)
@@ -628,7 +628,7 @@ async def reassignall(interaction: discord.Interaction, days: int = 30, revoke_o
         await interaction.followup.send(embed=embed, ephemeral=True)
         
     except Exception as e:
-        await interaction.followup.send(f"âŒ Error: {str(e)}", ephemeral=True)
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 # ==============================================================================
 # INTERACTIVE PANEL (Replaces Web Portal)
@@ -637,7 +637,7 @@ class PanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)  # Never timeout
     
-    @discord.ui.button(label="Login", emoji="ðŸ”‘", style=discord.ButtonStyle.primary, custom_id="panel_login")
+    @discord.ui.button(label="Login", emoji="🔑", style=discord.ButtonStyle.primary, custom_id="panel_login")
     async def login_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         try:
@@ -652,17 +652,17 @@ class PanelView(discord.ui.View):
             
             if not licenses:
                 embed = discord.Embed(
-                    title="âŒ No License Found",
+                    title="❌ No License Found",
                     description="You don't have any licenses.\nContact an admin to get one!",
                     color=0xFF5555
                 )
             else:
-                embed = discord.Embed(title="ðŸ”‘ Your Licenses", color=5814783)
+                embed = discord.Embed(title="🔑 Your Licenses", color=5814783)
                 for lic in licenses:
                     key, status, expires_at, hwid, created_at = lic
                     expires_str = datetime.fromtimestamp(expires_at).strftime('%Y-%m-%d') if expires_at else "N/A"
                     is_expired = expires_at < current_time
-                    status_display = "â° EXPIRED" if is_expired else f"âœ… {status.upper()}"
+                    status_display = "⏰ EXPIRED" if is_expired else f"✅ {status.upper()}"
                     hwid_display = hwid if hwid != "UNBOUND" else "Not activated"
                     
                     embed.add_field(
@@ -673,9 +673,9 @@ class PanelView(discord.ui.View):
             
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"âŒ Error: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
     
-    @discord.ui.button(label="Get Script", emoji="ðŸ“œ", style=discord.ButtonStyle.primary, custom_id="panel_getscript")
+    @discord.ui.button(label="Get Script", emoji="📜", style=discord.ButtonStyle.primary, custom_id="panel_getscript")
     async def getscript_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         try:
@@ -691,7 +691,7 @@ class PanelView(discord.ui.View):
             
             if not result:
                 embed = discord.Embed(
-                    title="âŒ Access Denied",
+                    title="❌ Access Denied",
                     description="You must have an **Active License** to get the script.\n\n1. Purchase a key\n2. Use `/genkey` (Admin)\n3. Click 'Login' to check status",
                     color=0xFF5555
                 )
@@ -703,18 +703,18 @@ class PanelView(discord.ui.View):
                 script_loader = f'_G.LicenseKey = "{key}"\nloadstring(game:HttpGet("{script_url}"))()'
                 
                 embed = discord.Embed(
-                    title="ðŸ“œ Your PXHB Script",
+                    title="📜 Your PXHB Script",
                     description="Copy the code below and paste it into your executor.",
                     color=0x55FF55
                 )
                 embed.add_field(name="Script Loader", value=f"```lua\n{script_loader}\n```", inline=False)
-                embed.add_field(name="âš ï¸ Warning", value="Do NOT share this! The key is linked to your hardware.", inline=False)
+                embed.add_field(name="⚠️ Warning", value="Do NOT share this! The key is linked to your hardware.", inline=False)
             
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"âŒ Error: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
     
-    @discord.ui.button(label="Stats", emoji="ðŸ“Š", style=discord.ButtonStyle.primary, custom_id="panel_stats")
+    @discord.ui.button(label="Stats", emoji="📊", style=discord.ButtonStyle.primary, custom_id="panel_stats")
     async def stats_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         try:
@@ -737,12 +737,12 @@ class PanelView(discord.ui.View):
             
             if total == 0:
                 embed = discord.Embed(
-                    title="ðŸ“Š Your Stats",
+                    title="📊 Your Stats",
                     description="You have no licenses yet!",
                     color=5814783
                 )
             else:
-                embed = discord.Embed(title="ðŸ“Š Your License Stats", color=5814783)
+                embed = discord.Embed(title="📊 Your License Stats", color=5814783)
                 embed.add_field(name="Total Licenses", value=str(total), inline=True)
                 embed.add_field(name="Active", value=str(active), inline=True)
                 
@@ -752,7 +752,7 @@ class PanelView(discord.ui.View):
             
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"âŒ Error: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
     
     @discord.ui.button(label="HWID Reset", emoji="🖥️", style=discord.ButtonStyle.primary, custom_id="panel_hwidreset")
     async def hwidreset_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -772,7 +772,7 @@ class PanelView(discord.ui.View):
             
             if not result:
                 embed = discord.Embed(
-                    title="âŒ No Active License",
+                    title="❌ No Active License",
                     description="You need an active license to reset HWID.",
                     color=0xFF5555
                 )
@@ -787,7 +787,7 @@ class PanelView(discord.ui.View):
                 days = remaining // 86400
                 hours = (remaining % 86400) // 3600
                 embed = discord.Embed(
-                    title="â° HWID Reset Cooldown",
+                    title="⏰ HWID Reset Cooldown",
                     description=f"You can reset your HWID in **{days}d {hours}h**.\n\nCooldown: {cooldown_days} days between resets.",
                     color=0xFFAA00
                 )
@@ -800,36 +800,36 @@ class PanelView(discord.ui.View):
                             (current_time, license_id))
             
             embed = discord.Embed(
-                title="âœ… HWID Reset Successful",
+                title="✅ HWID Reset Successful",
                 description="Your HWID has been reset!\nLaunch the script on your new PC to bind it.",
                 color=0x55FF55
             )
             embed.add_field(name="Next Reset Available", value=f"In {cooldown_days} days", inline=False)
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"âŒ Error: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
     
-    @discord.ui.button(label="Version", emoji="â„¹ï¸", style=discord.ButtonStyle.secondary, custom_id="panel_version")
+    @discord.ui.button(label="Version", emoji="ℹ️", style=discord.ButtonStyle.secondary, custom_id="panel_version")
     async def version_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         try:
             embed = discord.Embed(
-                title="â„¹ï¸ PXHB Script Version",
+                title="ℹ️ PXHB Script Version",
                 color=0x5865F2
             )
             embed.add_field(name="Current Version", value=f"**v{SCRIPT_VERSION}**", inline=True)
             embed.add_field(name="Last Updated", value=LAST_UPDATE, inline=True)
-            embed.add_field(name="Changelog", value="\n".join([f"â€¢ {item}" for item in CHANGELOG]), inline=False)
+            embed.add_field(name="Changelog", value="\n".join([f"• {item}" for item in CHANGELOG]), inline=False)
             embed.set_footer(text="If your script is outdated, click 'Get Script' again.")
             
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"âŒ Error: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="panel", description="Send the PXHB control panel embed (Owner Only)")
 async def panel(interaction: discord.Interaction):
     if not is_owner(interaction):
-        await interaction.response.send_message("âŒ This command is restricted to **Owners**.", ephemeral=True)
+        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
         return
     
     embed = discord.Embed(
@@ -846,12 +846,13 @@ async def panel(interaction: discord.Interaction):
 class ExternalPanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(
-            label="Download External", 
-            emoji="📥", 
-            style=discord.ButtonStyle.link, 
+        download_btn = discord.ui.Button(
+            label="Download External",
+            emoji="📥",
+            style=discord.ButtonStyle.link,
             url="https://github.com/Americanbreathing/Keypsal/releases/latest/download/PXHB_External_v1.0_RELEASE.zip"
-        ))
+        )
+        self.add_item(download_btn)
 
     @discord.ui.button(label="HWID Reset", emoji="🖥️", style=discord.ButtonStyle.primary, custom_id="ext_hwid_reset")
     async def hwid_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -870,7 +871,7 @@ class ExternalPanelView(discord.ui.View):
                 result = cursor.fetchone()
             
             if not result:
-                embed = discord.Embed(title="? No Active License", description="You need an active license to reset HWID.", color=0xFF5555)
+                embed = discord.Embed(title="❌ No Active License", description="You need an active license to reset HWID.", color=0xFF5555)
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             
@@ -879,21 +880,21 @@ class ExternalPanelView(discord.ui.View):
             if last_reset and (current_time - last_reset) < cooldown_seconds:
                 remaining = cooldown_seconds - (current_time - last_reset)
                 days, hours = remaining // 86400, (remaining % 86400) // 3600
-                embed = discord.Embed(title="? HWID Reset Cooldown", description=f"You can reset your HWID in **{days}d {hours}h**.", color=0xFFAA00)
+                embed = discord.Embed(title="⏰ HWID Reset Cooldown", description=f"You can reset your HWID in **{days}d {hours}h**.", color=0xFFAA00)
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             
             with get_db_connection() as conn:
                 conn.execute('''UPDATE licenses SET hwid = 'UNBOUND', last_hwid_reset = ? WHERE id = ?''', (current_time, license_id))
             
-            embed = discord.Embed(title="? HWID Reset Successful", description="Your HWID has been reset! Launch PXHB_External.exe on your new PC.", color=0x55FF55)
+            embed = discord.Embed(title="✅ HWID Reset Successful", description="Your HWID has been reset! Launch PXHB_External.exe on your new PC.", color=0x55FF55)
             await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
-            await interaction.followup.send(f"? Error: {str(e)}", ephemeral=True)
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
     @discord.ui.button(label="Setup Guide", emoji="📖", style=discord.ButtonStyle.secondary, custom_id="ext_guide")
     async def setup_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="?? External Setup Guide", color=0x5865F2)
+        embed = discord.Embed(title="📖 External Setup Guide", color=0x5865F2)
         embed.description = (
             "Follow these steps to get PXHB External running:\n\n"
             "1. **Download External**: Click 'Download External' button above\n"
@@ -902,25 +903,26 @@ class ExternalPanelView(discord.ui.View):
             "4. **Run External**: Open PXHB_External.exe and enter your license key\n"
             "5. **Enjoy**: The overlay will appear once authenticated!"
         )
-        embed.add_field(name="?? Important", value="Keep the folder structure intact! Don't move files.", inline=False)
+        embed.add_field(name="⚠️ Important", value="Keep the folder structure intact! Don't move files.", inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="extpanel", description="Send the External Support panel (Owner Only)")
 async def extpanel(interaction: discord.Interaction):
     if not is_owner(interaction):
-        await interaction.response.send_message("? This command is restricted to **Owners**.", ephemeral=True)
+        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
         return
     
     embed = discord.Embed(
-        title="?? PXHB External Download",
+        title="📥 PXHB External Download",
         description="Download and setup PXHB External cheat.\n\nClick the button below to download the latest version.",
         color=0x5865F2
     )
-    embed.add_field(name="What's Included", value="? Self-contained exe (no .NET needed)\n? Pattern scanner (PXHB.dll)\n? Offset files\n? Setup guide", inline=False)
+    embed.add_field(name="What's Included", value="✅ Self-contained exe (no .NET needed)\n✅ Pattern scanner (PXHB.dll)\n✅ Offset files\n✅ Setup guide", inline=False)
     embed.set_footer(text="Need help? Click 'Setup Guide' after downloading.")
     
     view = ExternalPanelView()
     await interaction.response.send_message(embed=embed, view=view)
+
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
