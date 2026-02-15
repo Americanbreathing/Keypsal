@@ -1082,25 +1082,9 @@ async def on_guild_channel_create(channel):
 # EXTERNAL PANEL (Specific for PXHB External Build)
 # ==============================================================================
 # GitHub raw URLs for the release files (works from any hosting)
-GITHUB_RAW_BASE = "https://raw.githubusercontent.com/Americanbreathing/Keypsal/main/release"
-EXTERNAL_EXE_URL = f"{GITHUB_RAW_BASE}/PXHB_External.exe"
-REQUIREMENTS_BAT_URL = f"{GITHUB_RAW_BASE}/install_requirements.bat"
-
-async def _download_github_file(url: str, filename: str):
-    """Downloads a file from GitHub and returns a discord.File, or None on failure."""
-    import tempfile
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.read()
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}")
-                tmp.write(data)
-                tmp.close()
-                return discord.File(tmp.name, filename=filename)
-    except Exception:
-        return None
+# Using github.com/user/repo/raw/main/... format often handles downloads better
+EXTERNAL_EXE_URL = "https://github.com/Americanbreathing/Keypsal/raw/main/release/PXHB_External.exe"
+REQUIREMENTS_BAT_URL = "https://github.com/Americanbreathing/Keypsal/raw/main/release/install_requirements.bat"
 
 class ExternalPanelView(discord.ui.View):
     def __init__(self):
@@ -1108,40 +1092,28 @@ class ExternalPanelView(discord.ui.View):
 
     @discord.ui.button(label="Download External", style=discord.ButtonStyle.success, emoji="📥", custom_id="ext_download")
     async def download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        try:
-            # Check for Customer Role
-            role = interaction.guild.get_role(CUSTOMER_ROLE_ID)
-            if role and role not in interaction.user.roles:
-                await interaction.followup.send("❌ You need the **Customer** role to download.", ephemeral=True)
-                return
+        # 1. Role Check
+        role = interaction.guild.get_role(CUSTOMER_ROLE_ID)
+        if role and role not in interaction.user.roles:
+            await interaction.response.send_message("❌ You need the **Customer** role to download.", ephemeral=True)
+            return
 
-            file = await _download_github_file(EXTERNAL_EXE_URL, "PXHB_External.exe")
-            if not file:
-                await interaction.followup.send("❌ Build file not found! Contact Admin.", ephemeral=True)
-                return
-
-            embed = discord.Embed(
-                title="📥 Download Ready",
-                description="Here is your build. \n\n**Usage:**\n1. Run `PXHB_External.exe` as Admin.\n2. Click 'INJECT' in the menu.",
-                color=0x00FF00
-            )
-            await interaction.followup.send(embed=embed, file=file, ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+        # 2. Send Direct Link
+        embed = discord.Embed(
+            title="📥 Download Ready",
+            description=f"Click below to download the latest build:\n\n👉 **[Download PXHB_External.exe]({EXTERNAL_EXE_URL})**\n\n*This link fetches directly from the repository.*",
+            color=0x00FF00
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="Install Requirements", style=discord.ButtonStyle.secondary, emoji="🛠️", custom_id="ext_reqs")
     async def reqs_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.defer(ephemeral=True)
-        try:
-            file = await _download_github_file(REQUIREMENTS_BAT_URL, "install_requirements.bat")
-            if not file:
-                await interaction.followup.send("❌ Requirements file not found!", ephemeral=True)
-                return
-            
-            await interaction.followup.send("🛠️ **Requirements Installer**\nRun this if the cheat doesn't open:", file=file, ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+        embed = discord.Embed(
+            title="🛠️ Requirements Installer",
+            description=f"If the cheat doesn't open, run this:\n\n👉 **[Download install_requirements.bat]({REQUIREMENTS_BAT_URL})**",
+            color=0x95a5a6
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @discord.ui.button(label="HWID Reset", style=discord.ButtonStyle.primary, emoji="🖥️", custom_id="ext_hwid")
     async def hwid_button(self, interaction: discord.Interaction, button: discord.ui.Button):
