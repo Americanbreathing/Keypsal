@@ -5,13 +5,11 @@ import os
 import base64
 import time
 import json
-import asyncpg
+import sqlite3
 from datetime import datetime
 from dotenv import load_dotenv
 from aiohttp import web
 import asyncio
-import secrets
-import string
 
 # Load environment variables
 load_dotenv()
@@ -22,10 +20,16 @@ ALERT_CHANNEL_ID = int(os.getenv('ALERT_CHANNEL_ID', '1456538170869944414')) # A
 SECRET_KEY = "PXHB_SECRET_KEY_8829" # MUST MATCH LUA SCRIPT
 WEBHOOK_PORT = int(os.getenv('PORT', 8080))  # Dynamic port for Railway/Cloud
 
-# DATABASE CONFIGURATION
-DATABASE_URL = os.getenv('DATABASE_URL') # Provided by Railway
-db_pool = None
+# Persistence Logic: Check for Railway Volume mount path
+# Default to current directory if not found
+DATA_DIR = os.getenv('DATA_DIR', '/app/data' if os.path.exists('/app/data') else '.')
+DB_NAME = os.path.join(DATA_DIR, 'licenses.db')
 
+# Ensure directory exists
+if not os.path.exists(DATA_DIR):
+    os.makedirs(DATA_DIR)
+
+print(f"[System] Database path: {DB_NAME}")
 CUSTOMER_ROLE_ID = 1456538123629494335 # Customer Role ID
 OWNER_ROLE_ID = 1456538170869944414 # Owner Role ID
 
@@ -43,35 +47,39 @@ CHANGELOG = [
 # ==============================================================================
 # DATABASE HELPERS
 # ==============================================================================
-async def init_db():
-    global db_pool
-    if not DATABASE_URL:
-        print("[Critical] DATABASE_URL not found! Postgres migration required.")
-        return
+def get_db_connection():
+    """Returns a thread-safe connection with WAL mode enabled."""
+    conn = sqlite3.connect(DB_NAME, timeout=15)
+    conn.execute('PRAGMA journal_mode=WAL;')
+    conn.execute('PRAGMA synchronous=NORMAL;')
+    return conn
 
-    db_pool = await asyncpg.create_pool(DATABASE_URL)
-    
-    async with db_pool.acquire() as conn:
-        await conn.execute('''CREATE TABLE IF NOT EXISTS licenses (
-            id SERIAL PRIMARY KEY,
+def init_db():
+    with get_db_connection() as conn:
+        conn.execute('''CREATE TABLE IF NOT EXISTS licenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             discord_id TEXT NOT NULL,
             discord_name TEXT NOT NULL,
             key TEXT UNIQUE NOT NULL,
             hwid TEXT,
             status TEXT DEFAULT 'pending',
-            created_at BIGINT NOT NULL,
-            activated_at BIGINT,
-            expires_at BIGINT NOT NULL,
-            last_hwid_reset BIGINT DEFAULT 0,
-            roblox_id TEXT
+            created_at INTEGER NOT NULL,
+            activated_at INTEGER,
+            expires_at INTEGER NOT NULL,
+            last_hwid_reset INTEGER DEFAULT 0
         )''')
-        await conn.execute('''CREATE TABLE IF NOT EXISTS sellers (
+        conn.execute('''CREATE TABLE IF NOT EXISTS sellers (
             discord_id TEXT PRIMARY KEY,
             discord_name TEXT NOT NULL,
-            added_at BIGINT NOT NULL
+            added_at INTEGER NOT NULL
         )''')
-        await conn.execute('''CREATE TABLE IF NOT EXISTS configs (
-            id SERIAL PRIMARY KEY,
+        # Schema Migration: Ensure roblox_id exists for multi-account detection
+        try:
+            conn.execute("ALTER TABLE licenses ADD COLUMN roblox_id TEXT")
+        except sqlite3.OperationalError:
+            pass # Column already exists
+        conn.execute('''CREATE TABLE IF NOT EXISTS configs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT NOT NULL,
             user_name TEXT NOT NULL,
             script_name TEXT NOT NULL,
@@ -79,27 +87,26 @@ async def init_db():
             description TEXT,
             data TEXT NOT NULL,
             upvotes INTEGER DEFAULT 0,
-            created_at BIGINT NOT NULL
+            created_at INTEGER NOT NULL
         )''')
-    print("[System] PostgreSQL Tables Initialized.")
+
+init_db()
 
 # ==============================================================================
 # ROLE HELPERS
 # ==============================================================================
 async def check_and_update_role(guild, user_id):
     """Checks if a user has any valid licenses and updates their role accordingly."""
-    if not db_pool:
-        return
-        
     try:
         current_time = int(time.time())
         has_active = False
         
-        async with db_pool.acquire() as conn:
-            row = await conn.fetchrow('''SELECT COUNT(*) FROM licenses 
-                            WHERE discord_id = $1 AND status != 'revoked' AND expires_at > $2''', 
-                         str(user_id), current_time)
-            count = row[0]
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''SELECT COUNT(*) FROM licenses 
+                            WHERE discord_id = ? AND status != 'revoked' AND expires_at > ?''', 
+                         (str(user_id), current_time))
+            count = cursor.fetchone()[0]
             has_active = (count > 0)
         
         member = guild.get_member(int(user_id)) or await guild.fetch_member(int(user_id))
@@ -185,10 +192,6 @@ async def send_security_alert(discord_id, key, hwid, old_hwid, rid, old_rid, rea
 async def handle_verify(request):
     """Strict key verification: checks HWID, RobloxID, expiration."""
     try:
-        if not db_pool:
-            print("[Verify Error] Database pool is not initialized!")
-            return web.json_response({'success': False, 'error': 'Database Offline'}, status=200)
-
         data = await request.json()
         print(f"[Verify] Request: {data}")
         key = data.get('key')
@@ -198,8 +201,11 @@ async def handle_verify(request):
         if not key or not hwid:
             return web.json_response({'success': False, 'error': 'Missing Parameters'}, status=200)
         
-        async with db_pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM licenses WHERE key = $1", key)
+        with get_db_connection() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM licenses WHERE key = ?", (key,))
+            row = cursor.fetchone()
             
             if not row:
                 return web.json_response({'success': False, 'error': 'Invalid Key'}, status=200)
@@ -207,10 +213,10 @@ async def handle_verify(request):
             db_hwid = row['hwid']
             db_status = row['status']
             db_expires = row['expires_at']
-            db_rid = row['roblox_id']
+            db_rid = row['roblox_id'] if 'roblox_id' in row.keys() else None
             
             # 1. Check Expiration
-            if db_expires < int(time.time()):
+            if db_expires < int(time.time()) and db_expires < 9999999999:
                  return web.json_response({'success': False, 'error': 'Key Expired'}, status=200)
 
             # 2. Check Revocation
@@ -219,8 +225,8 @@ async def handle_verify(request):
 
             # 3. Activation Logic (First Use)
             if db_status == 'pending':
-                await conn.execute("UPDATE licenses SET hwid = $1, roblox_id = $2, status = 'active', activated_at = $3 WHERE key = $4",
-                                 hwid, roblox_id, int(time.time()), key)
+                cursor.execute("UPDATE licenses SET hwid = ?, roblox_id = ?, status = 'active', activated_at = ? WHERE key = ?",
+                             (hwid, roblox_id, int(time.time()), key))
                 return web.json_response({'success': True, 'message': 'Activated'})
 
             # 4. Strict Validation (Already Active)
@@ -228,7 +234,7 @@ async def handle_verify(request):
                 await send_security_alert(row['discord_id'], key, hwid, db_hwid, roblox_id, db_rid, "HWID Mismatch")
                 return web.json_response({'success': False, 'error': 'HWID Mismatch'}, status=200)
             
-            if db_rid and db_rid != "Unknown" and db_rid != roblox_id:
+            if db_rid and db_rid != roblox_id:
                 await send_security_alert(row['discord_id'], key, hwid, db_hwid, roblox_id, db_rid, "Account Mismatch")
                 return web.json_response({'success': False, 'error': 'Account Mismatch: Key locked to another Roblox account.'}, status=200)
 
@@ -241,9 +247,6 @@ async def handle_verify(request):
 # Legacy endpoint for old clients (just activates pending keys)
 async def handle_activation(request):
     try:
-        if not db_pool:
-            return web.json_response({'success': False, 'error': 'Database Offline'}, status=500)
-
         data = await request.json()
         key = data.get('key')
         hwid = data.get('hwid')
@@ -251,13 +254,14 @@ async def handle_activation(request):
         if not key or not hwid:
             return web.json_response({'success': False, 'error': 'Missing key or hwid'}, status=400)
         
-        async with db_pool.acquire() as conn:
-            result = await conn.execute('''UPDATE licenses 
-                         SET hwid = $1, status = 'active', activated_at = $2 
-                         WHERE key = $3 AND status = 'pending' ''',
-                      hwid, int(time.time()), key)
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''UPDATE licenses 
+                         SET hwid = ?, status = 'active', activated_at = ? 
+                         WHERE key = ? AND status = 'pending' ''',
+                      (hwid, int(time.time()), key))
             
-            if result == "UPDATE 0":
+            if cursor.rowcount == 0:
                 return web.json_response({'success': False, 'error': 'Key not found or already activated'}, status=404)
         
         return web.json_response({'success': True, 'message': 'Key activated successfully'})
@@ -286,19 +290,17 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Periodically check for expired licenses and remove roles
 @tasks.loop(minutes=30)
 async def check_expirations():
-    if not db_pool:
-        # print("[Task] Database pool not ready, skipping check.")
-        return
-        
     print("[Task] Checking for license expirations...")
     try:
         # Get all unique discord IDs in the database
-        async with db_pool.acquire() as conn:
-            users = await conn.fetch('SELECT DISTINCT discord_id FROM licenses')
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT DISTINCT discord_id FROM licenses')
+            users = cursor.fetchall()
             
         for guild in bot.guilds:
             for row in users:
-                user_id = row['discord_id']
+                user_id = row[0]
                 await check_and_update_role(guild, user_id)
     except Exception as e:
         print(f"[Task Error] Error in check_expirations: {e}")
@@ -315,13 +317,11 @@ async def is_seller(interaction: discord.Interaction):
     """Checks if the user is a registered seller or an admin/owner."""
     if is_owner(interaction):
         return True
-    
-    if not db_pool:
-        return False
         
-    async with db_pool.acquire() as conn:
-        row = await conn.fetchrow("SELECT 1 FROM sellers WHERE discord_id = $1", str(interaction.user.id))
-        return row is not None
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM sellers WHERE discord_id = ?", (str(interaction.user.id),))
+        return cursor.fetchone() is not None
 
 # ==============================================================================
 # SELLERS MANAGEMENT (OWNER ONLY)
@@ -335,9 +335,9 @@ async def addseller(interaction: discord.Interaction, user: discord.Member):
         return
         
     try:
-        async with db_pool.acquire() as conn:
-            await conn.execute("INSERT INTO sellers (discord_id, discord_name, added_at) VALUES ($1, $2, $3) ON CONFLICT (discord_id) DO UPDATE SET discord_name = EXCLUDED.discord_name, added_at = EXCLUDED.added_at",
-                      str(user.id), str(user), int(time.time()))
+        with get_db_connection() as conn:
+            conn.execute("INSERT OR REPLACE INTO sellers (discord_id, discord_name, added_at) VALUES (?, ?, ?)",
+                      (str(user.id), str(user), int(time.time())))
         await interaction.response.send_message(f"✅ {user.mention} is now an authorized **Seller**.", ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"Error: {e}", ephemeral=True)
@@ -350,10 +350,10 @@ async def removeseller(interaction: discord.Interaction, user: discord.User):
         return
         
     try:
-        async with db_pool.acquire() as conn:
-            result = await conn.execute("DELETE FROM sellers WHERE discord_id = $1", str(user.id))
-            # result is a string like "DELETE 1"
-            count = int(result.split()[1])
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM sellers WHERE discord_id = ?", (str(user.id),))
+            count = cursor.rowcount
             
         if count > 0:
             await interaction.response.send_message(f"✅ Removed {user.mention} from authorized sellers.", ephemeral=True)
@@ -379,10 +379,10 @@ async def genkey(interaction: discord.Interaction, user: discord.User, days: int
         key, expiry = generate_license("UNBOUND", days)
         
         # Store in database
-        async with db_pool.acquire() as conn:
-            await conn.execute('''INSERT INTO licenses (discord_id, discord_name, key, created_at, expires_at)
-                         VALUES ($1, $2, $3, $4, $5)''',
-                      str(user.id), str(user), key, int(time.time()), int(expiry))
+        with get_db_connection() as conn:
+            conn.execute('''INSERT INTO licenses (discord_id, discord_name, key, created_at, expires_at)
+                         VALUES (?, ?, ?, ?, ?)''',
+                      (str(user.id), str(user), key, int(time.time()), expiry))
         
         # Add Customer Role immediately
         await check_and_update_role(interaction.guild, user.id)
@@ -391,7 +391,7 @@ async def genkey(interaction: discord.Interaction, user: discord.User, days: int
         if days >= 999:
             expiry_str = "Lifetime"
         else:
-            expiry_str = f"<t:{int(expiry)}:R>"
+            expiry_str = f"<t:{expiry}:R>"
             
         embed = discord.Embed(title="License Generated", color=0x00ff00)
         embed.add_field(name="User", value=user.mention, inline=False)
@@ -424,8 +424,10 @@ async def userinfo(interaction: discord.Interaction, user: discord.User):
     await interaction.response.defer(ephemeral=True)
     
     try:
-        async with db_pool.acquire() as conn:
-            licenses = await conn.fetch('SELECT * FROM licenses WHERE discord_id = $1 ORDER BY created_at DESC', str(user.id))
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT * FROM licenses WHERE discord_id = ? ORDER BY created_at DESC', (str(user.id),))
+            licenses = cursor.fetchall()
         
         if not licenses:
             await interaction.followup.send(f"{user.mention} has no licenses.", ephemeral=True)
@@ -434,13 +436,13 @@ async def userinfo(interaction: discord.Interaction, user: discord.User):
         embed = discord.Embed(title=f"Licenses for {user.name}", color=0x5865F2)
         
         for lic in licenses:
-            status_emoji = {"pending": "⏳", "active": "✅", "revoked": "❌"}.get(lic['status'], "❓")
-            hwid_display = lic['hwid'][:16] + "..." if lic['hwid'] and lic['hwid'] != "UNBOUND" else "Not activated"
-            expires = datetime.fromtimestamp(lic['expires_at']).strftime("%Y-%m-%d") if lic['expires_at'] < 9999999999 else "Lifetime"
+            status_emoji = {"pending": "⏳", "active": "✅", "revoked": "❌"}.get(lic[5], "❓")
+            hwid_display = lic[4][:16] + "..." if lic[4] else "Not activated"
+            expires = datetime.fromtimestamp(lic[8]).strftime("%Y-%m-%d") if lic[8] < 9999999999 else "Lifetime"
             
             embed.add_field(
-                name=f"{status_emoji} {lic['status'].upper()}",
-                value=f"**Key:** `{lic['key'][:20]}...`\n**HWID:** `{hwid_display}`\n**Expires:** {expires}",
+                name=f"{status_emoji} {lic[5].upper()}",
+                value=f"**Key:** `{lic[3][:20]}...`\n**HWID:** `{hwid_display}`\n**Expires:** {expires}",
                 inline=False
             )
         
@@ -458,9 +460,10 @@ async def revoke(interaction: discord.Interaction, user: discord.User):
     await interaction.response.defer(ephemeral=True)
     
     try:
-        async with db_pool.acquire() as conn:
-            result = await conn.execute("UPDATE licenses SET status = 'revoked' WHERE discord_id = $1 AND status != 'revoked'", str(user.id))
-            count = int(result.split()[1])
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE licenses SET status = 'revoked' WHERE discord_id = ? AND status != 'revoked'", (str(user.id),))
+            count = cursor.rowcount
             
         # Re-check and potentially remove role
         await check_and_update_role(interaction.guild, user.id)
@@ -481,11 +484,20 @@ async def stats(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     
     try:
-        async with db_pool.acquire() as conn:
-            total = await conn.fetchval("SELECT COUNT(*) FROM licenses")
-            active = await conn.fetchval("SELECT COUNT(*) FROM licenses WHERE status = 'active'")
-            pending = await conn.fetchval("SELECT COUNT(*) FROM licenses WHERE status = 'pending'")
-            revoked = await conn.fetchval("SELECT COUNT(*) FROM licenses WHERE status = 'revoked'")
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT COUNT(*) FROM licenses")
+            total = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM licenses WHERE status = 'active'")
+            active = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM licenses WHERE status = 'pending'")
+            pending = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM licenses WHERE status = 'revoked'")
+            revoked = cursor.fetchone()[0]
         
         embed = discord.Embed(title="License Statistics", color=0x5865F2)
         embed.add_field(name="Total Keys", value=str(total), inline=True)
@@ -571,21 +583,21 @@ async def _reassign_logic(interaction: discord.Interaction, days: int, revoke_ol
             try:
                 # Optionally revoke old keys
                 if revoke_old:
-                    async with db_pool.acquire() as conn:
-                        await conn.execute("UPDATE licenses SET status = 'revoked' WHERE discord_id = $1 AND status != 'revoked'", 
-                                   str(member.id))
+                    with get_db_connection() as conn:
+                        conn.execute("UPDATE licenses SET status = 'revoked' WHERE discord_id = ? AND status != 'revoked'", 
+                                   (str(member.id),))
                 
                 # Generate new key
                 key, expiry = generate_license("UNBOUND", days)
                 
-                async with db_pool.acquire() as conn:
-                    await conn.execute('''INSERT INTO licenses (discord_id, discord_name, key, created_at, expires_at)
-                                 VALUES ($1, $2, $3, $4, $5)''',
-                              str(member.id), str(member), key, int(time.time()), int(expiry))
+                with get_db_connection() as conn:
+                    conn.execute('''INSERT INTO licenses (discord_id, discord_name, key, created_at, expires_at)
+                                 VALUES (?, ?, ?, ?, ?)''',
+                              (str(member.id), str(member), key, int(time.time()), expiry))
                 
                 # Try to DM the user their new key
                 try:
-                    expiry_str = "Lifetime" if days >= 999 else f"<t:{int(expiry)}:R>"
+                    expiry_str = "Lifetime" if days >= 999 else f"<t:{expiry}:R>"
                     dm_embed = discord.Embed(title="🔑 New PXHB License Key", color=0x00ff00)
                     dm_embed.description = "Your license has been reassigned. Here's your new key:"
                     dm_embed.add_field(name="Key", value=f"```{key}```", inline=False)
@@ -691,9 +703,11 @@ class PanelView(discord.ui.View):
             user_id = str(interaction.user.id)
             current_time = int(time.time())
             
-            async with db_pool.acquire() as conn:
-                licenses = await conn.fetch('''SELECT key, status, expires_at, hwid, created_at 
-                                FROM licenses WHERE discord_id = $1 ORDER BY created_at DESC''', user_id)
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''SELECT key, status, expires_at, hwid, created_at 
+                                FROM licenses WHERE discord_id = ? ORDER BY created_at DESC''', (user_id,))
+                licenses = cursor.fetchall()
             
             if not licenses:
                 embed = discord.Embed(
@@ -727,12 +741,14 @@ class PanelView(discord.ui.View):
             user_id = str(interaction.user.id)
             current_time = int(time.time())
             
-            async with db_pool.acquire() as conn:
-                row = await conn.fetchrow('''SELECT key FROM licenses 
-                                WHERE discord_id = $1 AND status != 'revoked' AND expires_at > $2
-                                ORDER BY created_at DESC LIMIT 1''', user_id, current_time)
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''SELECT key FROM licenses 
+                                WHERE discord_id = ? AND status != 'revoked' AND expires_at > ?
+                                ORDER BY created_at DESC LIMIT 1''', (user_id, current_time))
+                result = cursor.fetchone()
             
-            if not row:
+            if not result:
                 embed = discord.Embed(
                     title="❌ Access Denied",
                     description="You must have an **Active License** to get the script.\n\n1. Purchase a key\n2. Use `/genkey` (Admin)\n3. Click 'Login' to check status",
@@ -764,14 +780,19 @@ class PanelView(discord.ui.View):
             user_id = str(interaction.user.id)
             current_time = int(time.time())
             
-            async with db_pool.acquire() as conn:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
                 # Get user's license stats
-                total = await conn.fetchval('SELECT COUNT(*) FROM licenses WHERE discord_id = $1', user_id)
-                active = await conn.fetchval('SELECT COUNT(*) FROM licenses WHERE discord_id = $1 AND status = "active" AND expires_at > $2', 
-                              user_id, current_time)
-                latest_expiry_row = await conn.fetchrow('SELECT expires_at FROM licenses WHERE discord_id = $1 AND expires_at > $2 ORDER BY expires_at DESC LIMIT 1', 
-                              user_id, current_time)
-                latest_expiry = latest_expiry_row['expires_at'] if latest_expiry_row else None
+                cursor.execute('SELECT COUNT(*) FROM licenses WHERE discord_id = ?', (user_id,))
+                total = cursor.fetchone()[0]
+                
+                cursor.execute('SELECT COUNT(*) FROM licenses WHERE discord_id = ? AND status = "active" AND expires_at > ?', 
+                              (user_id, current_time))
+                active = cursor.fetchone()[0]
+                
+                cursor.execute('SELECT expires_at FROM licenses WHERE discord_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1', 
+                              (user_id, current_time))
+                latest_expiry = cursor.fetchone()
             
             if total == 0:
                 embed = discord.Embed(
@@ -801,10 +822,12 @@ class PanelView(discord.ui.View):
             cooldown_days = 7
             cooldown_seconds = cooldown_days * 24 * 60 * 60
             
-            async with db_pool.acquire() as conn:
-                result = await conn.fetchrow('''SELECT id, key, hwid, last_hwid_reset, expires_at 
-                                FROM licenses WHERE discord_id = $1 AND status != 'revoked' AND expires_at > $2
-                                ORDER BY created_at DESC LIMIT 1''', user_id, current_time)
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''SELECT id, key, hwid, last_hwid_reset, expires_at 
+                                FROM licenses WHERE discord_id = ? AND status != 'revoked' AND expires_at > ?
+                                ORDER BY created_at DESC LIMIT 1''', (user_id, current_time))
+                result = cursor.fetchone()
             
             if not result:
                 embed = discord.Embed(
@@ -815,7 +838,7 @@ class PanelView(discord.ui.View):
                 await interaction.followup.send(embed=embed, ephemeral=True)
                 return
             
-            license_id, key, hwid, last_reset, expires_at = result['id'], result['key'], result['hwid'], result['last_hwid_reset'], result['expires_at']
+            license_id, key, hwid, last_reset, expires_at = result
             
             # Check cooldown
             if last_reset and (current_time - last_reset) < cooldown_seconds:
@@ -831,9 +854,9 @@ class PanelView(discord.ui.View):
                 return
             
             # Perform reset
-            async with db_pool.acquire() as conn:
-                await conn.execute('''UPDATE licenses SET hwid = 'UNBOUND', last_hwid_reset = $1 WHERE id = $2''', 
-                            current_time, license_id)
+            with get_db_connection() as conn:
+                conn.execute('''UPDATE licenses SET hwid = 'UNBOUND', last_hwid_reset = ? WHERE id = ?''', 
+                            (current_time, license_id))
             
             embed = discord.Embed(
                 title="✅ HWID Reset Successful",
@@ -862,62 +885,6 @@ class PanelView(discord.ui.View):
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
-class ExternalPanelView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(discord.ui.Button(label="Download External", emoji="📥", style=discord.ButtonStyle.link, url="https://github.com/Americanbreathing/Keypsal/releases/latest/download/PXHB_External.exe"))
-        self.add_item(discord.ui.Button(label="Install Requirements", emoji="🛠️", style=discord.ButtonStyle.link, url="https://raw.githubusercontent.com/Americanbreathing/Keypsal/main/PXHB_CSharp/install_requirements.bat"))
-
-    @discord.ui.button(label="HWID Reset", emoji="🖥️", style=discord.ButtonStyle.primary, custom_id="ext_hwid_reset")
-    async def hwid_reset(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # We can reuse the logic from PanelView.hwidreset_button (copied here for simplicity in a self-contained persistent view)
-        await interaction.response.defer(ephemeral=True)
-        try:
-            user_id = str(interaction.user.id)
-            current_time = int(time.time())
-            cooldown_days = 7
-            cooldown_seconds = cooldown_days * 24 * 60 * 60
-            
-            async with db_pool.acquire() as conn:
-                result = await conn.fetchrow('''SELECT id, key, hwid, last_hwid_reset, expires_at 
-                                FROM licenses WHERE discord_id = $1 AND status != 'revoked' AND expires_at > $2
-                                ORDER BY created_at DESC LIMIT 1''', user_id, current_time)
-            
-            if not result:
-                embed = discord.Embed(title="❌ No Active License", description="You need an active license to reset HWID.", color=0xFF5555)
-                await interaction.followup.send(embed=embed, ephemeral=True)
-                return
-            
-            license_id, last_reset = result['id'], result['last_hwid_reset']
-            
-            if last_reset and (current_time - last_reset) < cooldown_seconds:
-                remaining = cooldown_seconds - (current_time - last_reset)
-                days, hours = remaining // 86400, (remaining % 86400) // 3600
-                embed = discord.Embed(title="⏰ HWID Reset Cooldown", description=f"You can reset your HWID in **{days}d {hours}h**.", color=0xFFAA00)
-                await interaction.followup.send(embed=embed, ephemeral=True)
-                return
-            
-            async with db_pool.acquire() as conn:
-                await conn.execute('''UPDATE licenses SET hwid = 'UNBOUND', last_hwid_reset = $1 WHERE id = $2''', current_time, license_id)
-            
-            embed = discord.Embed(title="✅ HWID Reset Successful", description="Your HWID has been reset! Launch PXHB_External.exe on your new PC.", color=0x55FF55)
-            await interaction.followup.send(embed=embed, ephemeral=True)
-        except Exception as e:
-            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
-
-    @discord.ui.button(label="Setup Guide", emoji="📖", style=discord.ButtonStyle.secondary, custom_id="ext_guide")
-    async def setup_guide(self, interaction: discord.Interaction, button: discord.ui.Button):
-        embed = discord.Embed(title="📖 External Setup Guide", color=0x5865F2)
-        embed.description = (
-            "Follow these steps to get PXHB External running:\n\n"
-            "1. **Download Requirements**: Click the button above to download `install_requirements.bat` and run it as Administrator.\n"
-            "2. **Download External**: Download `PXHB_External.exe` and place it in a folder.\n"
-            "3. **Launch Roblox**: Open Roblox and join any game.\n"
-            "4. **Run External**: Open the EXE and enter your license key.\n"
-            "5. **Enjoy**: The overlay will appear once authenticated!"
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-
 @bot.tree.command(name="panel", description="Send the PXHB control panel embed (Owner Only)")
 async def panel(interaction: discord.Interaction):
     if not is_owner(interaction):
@@ -933,26 +900,9 @@ async def panel(interaction: discord.Interaction):
     view = PanelView()
     await interaction.response.send_message(embed=embed, view=view)
 
-@bot.tree.command(name="extpanel", description="Send the External Support panel embed (Owner Only)")
-async def extpanel(interaction: discord.Interaction):
-    if not is_owner(interaction):
-        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
-        return
-    
-    embed = discord.Embed(
-        title="⚡ PXHB External Support",
-        description="Download the external cheat and requirements below. Ensure you have an active license before launching.",
-        color=0x9b59b6
-    )
-    embed.add_field(name="🚀 Getting Started", value="1. Run Requirements first\n2. Open External EXE\n3. Authenticate with your key", inline=False)
-    
-    view = ExternalPanelView()
-    await interaction.response.send_message(embed=embed, view=view)
-
 # Register persistent view on bot startup
 @bot.event
 async def on_ready():
-    await init_db()
     print(f'Logged in as {bot.user} (ID: {bot.user.id})')
     
     # Register persistent views for panel buttons
@@ -966,8 +916,7 @@ async def on_ready():
         print(f'Sync error: {e}')
     
     # Start background tasks
-    if not check_expirations.is_running():
-        check_expirations.start()
+    check_expirations.start()
     asyncio.create_task(start_webhook_server())
 
 # ==============================================================================
@@ -1040,10 +989,10 @@ class VerifyPurchaseView(discord.ui.View):
             key, expiry = generate_license("UNBOUND", 30) # 30 Days default
             
             # Save to DB
-            async with db_pool.acquire() as conn:
-                await conn.execute('''INSERT INTO licenses (discord_id, discord_name, key, created_at, expires_at, roblox_id)
-                             VALUES ($1, $2, $3, $4, $5, $6)''',
-                          str(interaction.user.id), str(interaction.user), key, int(time.time()), int(expiry), str(self.roblox_id))
+            with get_db_connection() as conn:
+                conn.execute('''INSERT INTO licenses (discord_id, discord_name, key, created_at, expires_at, roblox_id)
+                             VALUES (?, ?, ?, ?, ?, ?)''',
+                          (str(interaction.user.id), str(interaction.user), key, int(time.time()), expiry, str(self.roblox_id)))
             
             # Assign Role
             await check_and_update_role(interaction.guild, interaction.user.id)
@@ -1128,6 +1077,124 @@ async def on_guild_channel_create(channel):
             color=0x5865F2
         )
         await channel.send(embed=embed, view=ProductSelectView())
+
+# ==============================================================================
+# EXTERNAL PANEL (Specific for PXHB External Build)
+# ==============================================================================
+# Paths are relative to the repo root (works on Railway & local)
+_BOT_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(_BOT_DIR)
+EXTERNAL_BUILD_PATH = os.path.join(_REPO_ROOT, "release", "PXHB_External.exe")
+REQUIREMENTS_PATH = os.path.join(_REPO_ROOT, "release", "install_requirements.bat")
+
+class ExternalPanelView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="Download External", style=discord.ButtonStyle.success, emoji="📥", custom_id="ext_download")
+    async def download_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            # Check for Customer Role
+            role = interaction.guild.get_role(CUSTOMER_ROLE_ID)
+            if role and role not in interaction.user.roles:
+                await interaction.followup.send("❌ You need the **Customer** role to download.", ephemeral=True)
+                return
+
+            if not os.path.exists(EXTERNAL_BUILD_PATH):
+                await interaction.followup.send("❌ Build file not found on server! Contact Admin.", ephemeral=True)
+                return
+
+            file = discord.File(EXTERNAL_BUILD_PATH, filename="PXHB_External.exe")
+            embed = discord.Embed(
+                title="📥 Download Ready",
+                description="Here is your build. \n\n**Usage:**\n1. Run `PXHB_External.exe` as Admin.\n2. Click 'INJECT' in the menu.",
+                color=0x00FF00
+            )
+            await interaction.followup.send(embed=embed, file=file, ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+    @discord.ui.button(label="Install Requirements", style=discord.ButtonStyle.secondary, emoji="🛠️", custom_id="ext_reqs")
+    async def reqs_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.defer(ephemeral=True)
+        try:
+            if not os.path.exists(REQUIREMENTS_PATH):
+                await interaction.followup.send("❌ Requirements file not found!", ephemeral=True)
+                return
+            
+            file = discord.File(REQUIREMENTS_PATH, filename="install_requirements.bat")
+            await interaction.followup.send("🛠️ **Requirements Installer**\nRun this if the cheat doesn't open:", file=file, ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+    @discord.ui.button(label="HWID Reset", style=discord.ButtonStyle.primary, emoji="🖥️", custom_id="ext_hwid")
+    async def hwid_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Reuse logic from main panel
+        # We can instantiate the main panel view and call its method, or copy logic.
+        # Copying logic for simplicity and decoupling.
+        await interaction.response.defer(ephemeral=True)
+        try:
+            user_id = str(interaction.user.id)
+            current_time = int(time.time())
+            cooldown_days = 7
+            cooldown_seconds = cooldown_days * 24 * 60 * 60
+            
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''SELECT id, key, hwid, last_hwid_reset 
+                                FROM licenses WHERE discord_id = ? AND status != 'revoked' AND expires_at > ?
+                                ORDER BY created_at DESC LIMIT 1''', (user_id, current_time))
+                result = cursor.fetchone()
+            
+            if not result:
+                await interaction.followup.send("❌ No Active License found.", ephemeral=True)
+                return
+            
+            license_id, key, hwid, last_reset = result
+            
+            if last_reset and (current_time - last_reset) < cooldown_seconds:
+                days = (cooldown_seconds - (current_time - last_reset)) // 86400
+                await interaction.followup.send(f"⏰ HWID Reset Cooldown: **{days} days** remaining.", ephemeral=True)
+                return
+
+            with get_db_connection() as conn:
+                conn.execute("UPDATE licenses SET hwid = 'UNBOUND', last_hwid_reset = ? WHERE id = ?", (current_time, license_id))
+            
+            await interaction.followup.send("✅ **HWID Reset Successful!**\nRestart the cheat to bind to this PC.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+    @discord.ui.button(label="Setup Guide", style=discord.ButtonStyle.secondary, emoji="📚", custom_id="ext_guide")
+    async def guide_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(title="📚 Setup Guide", color=0x5865F2)
+        embed.description = """
+**Step 1:** Download `PXHB_External.exe`.
+**Step 2:** Run as **Administrator**.
+**Step 3:** Launch Roblox.
+**Step 4:** Click **INJECT** in the prompt.
+
+**Troubleshooting:**
+- If menu doesn't show: Ensure specific Overlay permission is enabled in Windows settings.
+- If it crashes: Run `install_requirements.bat`.
+- If key doesn't work: Click **HWID Reset**.
+        """
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+@bot.tree.command(name="extpanel", description="Send the PXHB External (Buyer) Panel")
+async def extpanel(interaction: discord.Interaction):
+    if not is_owner(interaction):
+        await interaction.response.send_message("❌ This command is restricted to **Owners**.", ephemeral=True)
+        return
+    
+    embed = discord.Embed(
+        title="PXHB External v1.1 Download",
+        description="**Download and setup PXHB External cheat.**\n\nClick the buttons below to download v1.1 with smooth ESP!\n\n✨ **New in v1.1**\n• Butter-smooth ESP\n• Auto game refresh\n• No restart needed between games!\n\n**What's Included:**\n✅ Self-contained exe (no .NET needed)\n✅ Pattern scanner\n✅ Offset files\n✅ Setup guide\n\nPXHB External v1.1 - Feb 14, 2026",
+        color=0x9b59b6 # Purple-ish
+    )
+    
+    view = ExternalPanelView()
+    await interaction.response.send_message(embed=embed, view=view)
 
 # Run Bot
 if __name__ == "__main__":
