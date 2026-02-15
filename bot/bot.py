@@ -1081,11 +1081,26 @@ async def on_guild_channel_create(channel):
 # ==============================================================================
 # EXTERNAL PANEL (Specific for PXHB External Build)
 # ==============================================================================
-# Paths are relative to the repo root (works on Railway & local)
-_BOT_DIR = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.dirname(_BOT_DIR)
-EXTERNAL_BUILD_PATH = os.path.join(_REPO_ROOT, "release", "PXHB_External.exe")
-REQUIREMENTS_PATH = os.path.join(_REPO_ROOT, "release", "install_requirements.bat")
+# GitHub raw URLs for the release files (works from any hosting)
+GITHUB_RAW_BASE = "https://raw.githubusercontent.com/Americanbreathing/Keypsal/main/release"
+EXTERNAL_EXE_URL = f"{GITHUB_RAW_BASE}/PXHB_External.exe"
+REQUIREMENTS_BAT_URL = f"{GITHUB_RAW_BASE}/install_requirements.bat"
+
+async def _download_github_file(url: str, filename: str):
+    """Downloads a file from GitHub and returns a discord.File, or None on failure."""
+    import tempfile
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.read()
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{filename}")
+                tmp.write(data)
+                tmp.close()
+                return discord.File(tmp.name, filename=filename)
+    except Exception:
+        return None
 
 class ExternalPanelView(discord.ui.View):
     def __init__(self):
@@ -1101,11 +1116,11 @@ class ExternalPanelView(discord.ui.View):
                 await interaction.followup.send("❌ You need the **Customer** role to download.", ephemeral=True)
                 return
 
-            if not os.path.exists(EXTERNAL_BUILD_PATH):
-                await interaction.followup.send("❌ Build file not found on server! Contact Admin.", ephemeral=True)
+            file = await _download_github_file(EXTERNAL_EXE_URL, "PXHB_External.exe")
+            if not file:
+                await interaction.followup.send("❌ Build file not found! Contact Admin.", ephemeral=True)
                 return
 
-            file = discord.File(EXTERNAL_BUILD_PATH, filename="PXHB_External.exe")
             embed = discord.Embed(
                 title="📥 Download Ready",
                 description="Here is your build. \n\n**Usage:**\n1. Run `PXHB_External.exe` as Admin.\n2. Click 'INJECT' in the menu.",
@@ -1119,11 +1134,11 @@ class ExternalPanelView(discord.ui.View):
     async def reqs_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.defer(ephemeral=True)
         try:
-            if not os.path.exists(REQUIREMENTS_PATH):
+            file = await _download_github_file(REQUIREMENTS_BAT_URL, "install_requirements.bat")
+            if not file:
                 await interaction.followup.send("❌ Requirements file not found!", ephemeral=True)
                 return
             
-            file = discord.File(REQUIREMENTS_PATH, filename="install_requirements.bat")
             await interaction.followup.send("🛠️ **Requirements Installer**\nRun this if the cheat doesn't open:", file=file, ephemeral=True)
         except Exception as e:
             await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
